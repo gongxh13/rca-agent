@@ -1,0 +1,29 @@
+[project]
+name = "rca-agent"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "rca-agent",email = "rca-agent@huawei.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11, <4.0"
+dependencies = [
+    "langchain >= 1.1",
+    "langchain-core >= 1.1",
+    "langchain-experimental >= 0.4",
+    "langchain-deepseek >= 1.0",
+    "deepagents >= 0.2",
+    "pandas >= 2.0",
+    "networkx >= 3.0",
+    "langfuse >= 3.0",
+    "matplotlib >= 3.0",
+]
+
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
