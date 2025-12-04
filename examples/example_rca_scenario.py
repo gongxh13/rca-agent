@@ -67,7 +67,6 @@ def scenario_1(agent, langfuse_handler):
     question = """
 2021年3月4日，在14:30至15:00的时间范围内，系统中检测到一次故障。根因发生的确切时间未知。请确定根因的具体发生时间。
     """
-    
     print(f"\n问题:\n{question}")
     print("\n" + "-" * 80)
     print("开始分析...")
@@ -236,10 +235,10 @@ def main():
     print("=" * 80)
     
     # Scenario 1: 故障时间定位
-    # scenario_1(agent, langfuse_handler)
+    scenario_1(agent, langfuse_handler)
     
     # # Scenario 2: 根因组件和原因分析
-    scenario_2(agent, langfuse_handler)
+    # scenario_2(agent, langfuse_handler)
     
     # # Scenario 3: 完整根因分析
     # scenario_3(agent, langfuse_handler)
