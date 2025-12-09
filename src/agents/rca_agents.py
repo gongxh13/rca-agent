@@ -251,7 +251,7 @@ def create_root_cause_localizer_agent(
 
     return create_agent(
         model,
-        system_prompt=METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
+        system_prompt=ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})
     # Create DeepAgent
