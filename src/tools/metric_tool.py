@@ -45,11 +45,7 @@ class MetricAnalysisTool(BaseRCATool):
             self.get_service_performance,
             self.find_slow_services,
             self.find_low_success_rate_services,
-            self.compare_service_performance,
-            self.get_resource_metrics,
-            self.find_high_resource_usage,
             self.detect_metric_anomalies,
-            self.get_component_health_summary,
             self.get_available_components,
             self.get_available_metrics,
         ]
@@ -125,141 +121,69 @@ class MetricAnalysisTool(BaseRCATool):
         """
         raise NotImplementedError()
     
-    @tool
-    def compare_service_performance(
-        self,
-        service_name: str,
-        current_start: str,
-        current_end: str,
-        baseline_start: str,
-        baseline_end: str
-    ) -> str:
-        """Compare service performance between current and baseline periods.
-        
-        Helps identify if current service behavior deviates from normal patterns
-        by comparing against a baseline period.
-        
-        Args:
-            service_name: Name of the service to analyze
-            current_start: Start of current period in ISO format
-            current_end: End of current period in ISO format
-            baseline_start: Start of baseline period in ISO format
-            baseline_end: End of baseline period in ISO format
-            
-        Returns:
-            Comparison showing percentage changes in response time, success rate,
-            and request volume between the two periods
-        """
-        raise NotImplementedError()
-    
     # Infrastructure Metrics Tools (container/component-level analysis)
-    
-    @tool
-    def get_resource_metrics(
-        self,
-        component_id: str,
-        metric_pattern: str,
-        start_time: str,
-        end_time: str
-    ) -> str:
-        """Get specific resource metrics for a component.
-        
-        Retrieves and summarizes infrastructure metrics like CPU, memory, disk I/O,
-        or network for a specific component.
-        
-        Args:
-            component_id: Component identifier (e.g., "Tomcat01", "Mysql02")
-            metric_pattern: Pattern to match metric names (e.g., "CPU", "Memory", "Disk")
-            start_time: Start time in ISO format
-            end_time: End time in ISO format
-            
-        Returns:
-            Statistical summary of matching metrics including min, max, average,
-            and p95 values with trend analysis
-        """
-        raise NotImplementedError()
-    
-    @tool
-    def find_high_resource_usage(
-        self,
-        metric_pattern: str,
-        start_time: str,
-        end_time: str,
-        threshold: float = 80.0,
-        top: int = 10
-    ) -> str:
-        """Find components with high resource usage based on metric pattern.
-        
-        Identifies infrastructure components with metrics exceeding a threshold.
-        Useful for finding resource bottlenecks and stressed components.
-        
-        Args:
-            metric_pattern: Pattern to match metric names (e.g., "CPU", "Memory", "Disk", "Network")
-            start_time: Start time in ISO format
-            end_time: End time in ISO format
-            threshold: Threshold value for filtering (default: 80.0). Unit depends on the metric.
-            top: Maximum number of results to return (default: 10)
-            
-        Returns:
-            List of top components exceeding the threshold with their peak and average
-            values, sorted by peak value
-        """
-        raise NotImplementedError()
     
     @tool
     def detect_metric_anomalies(
         self,
         start_time: str,
         end_time: str,
+        method: str = "both",
         component_id: Optional[str] = None,
         sensitivity: float = 3.0,
-        top: int = 10
+        top: int = 10,
+        ruptures_algorithm: str = "pelt",
+        ruptures_model: str = "rbf",
+        pen: float = 5.0,
+        z_threshold: Optional[float] = None,
+        min_data_points_ruptures: int = 10,
+        min_data_points_zscore: int = 5,
+        min_consecutive: int = 3
     ) -> str:
-        """Detect anomalous metric values using statistical analysis.
+        """Detect anomalous metric values using ruptures or Z-score methods.
         
-        Uses z-score based anomaly detection to find unusual metric values
-        that deviate significantly from normal patterns.
+        A robust tool for detecting anomalies in core metrics (CPU, memory, disk, network, JVM)
+        using either ruptures change point detection or Z-score statistical analysis.
+        Automatically handles timezone conversion and focuses on candidate components.
         
         Args:
-            start_time: Start time in ISO format
-            end_time: End time in ISO format
-            component_id: Optional specific component to analyze (if None, analyzes all)
-            sensitivity: Number of standard deviations for anomaly threshold (default: 3.0)
-            top: Maximum number of anomalies to return (default: 10)
+            start_time: Start time in ISO format (e.g., "2021-03-04T01:00:00" or "2021-03-04T01:00:00+08:00")
+            end_time: End time in ISO format (e.g., "2021-03-04T01:30:00" or "2021-03-04T01:30:00+08:00")
+            method: Detection method - "ruptures", "zscore", or "both" (default: "both")
+            component_id: Optional specific component to analyze (if None, analyzes all candidate components)
+            sensitivity: Z-score threshold for zscore method (default: 3.0)
+            top: Maximum number of anomalies to return (default: 10, not used if method="both")
+            ruptures_algorithm: Algorithm for ruptures - "pelt", "binseg", "dynp", "window" (default: "pelt")
+            ruptures_model: Model for ruptures - "rbf", "l1", "l2", "linear", "normal", "ar", "rank" (default: "rbf")
+            pen: Penalty parameter for ruptures (default: 5.0)
+            z_threshold: Z-score threshold (default: None, uses sensitivity if None)
+            min_data_points_ruptures: Minimum data points for ruptures (default: 10)
+            min_data_points_zscore: Minimum data points for zscore (default: 5)
+            min_consecutive: Minimum consecutive anomaly points for zscore (default: 3)
             
         Returns:
-            List of detected anomalies with metric names, component IDs, timestamps,
-            values, and severity scores
-        """
-        raise NotImplementedError()
-    
-    @tool
-    def get_component_health_summary(
-        self,
-        start_time: str,
-        end_time: str,
-        component_id: Optional[str] = None,
-        metric_pattern: Optional[str] = None,
-        warning_threshold: float = 80.0,
-        critical_threshold: float = 90.0
-    ) -> str:
-        """Get health summary for infrastructure components based on metric thresholds.
-        
-        Provides an overall health assessment of components by checking if metrics
-        exceed warning or critical thresholds.
-        
-        Args:
-            start_time: Start time in ISO format
-            end_time: End time in ISO format
-            component_id: Optional specific component (if None, summarizes all components)
-            metric_pattern: Optional pattern to filter which metrics to check (e.g., "CPU", "Memory")
-                          If None, checks all metrics
-            warning_threshold: Threshold for warning status (default: 80.0)
-            critical_threshold: Threshold for critical status (default: 90.0)
+            JSON string containing list of anomalies with:
+            - component_name: Component name
+            - faulty_kpi: KPI name
+            - fault_start_time: ISO format timestamp (fault start point)
+            - severity_score: Severity description
+            - deviation_pct: Deviation percentage
+            - method: Detection method used
             
-        Returns:
-            Health summary with status (healthy/warning/critical) for each component,
-            key metrics, and any concerning patterns detected
+        Ruptures Algorithms:
+            - "pelt": Pruned Exact Linear Time - Fast and accurate, good for most scenarios (default)
+            - "binseg": Binary Segmentation - Fast but may not find global optimum
+            - "dynp": Dynamic Programming - Global optimum but computationally expensive
+            - "window": Window-based - Good for online detection
+            
+        Ruptures Models:
+            - "rbf": Radial Basis Function - Good for non-linear patterns (default)
+            - "l1": L1 norm - Robust to outliers
+            - "l2": L2 norm - Standard least squares
+            - "linear": Linear model - For linear trends
+            - "normal": Normal distribution - For Gaussian data
+            - "ar": Auto-regressive - For time series with dependencies
+            - "rank": Rank-based - Non-parametric, robust
         """
         raise NotImplementedError()
     
