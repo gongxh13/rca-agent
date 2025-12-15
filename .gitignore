@@ -1,5 +1,8 @@
 datasets
 
+# Generated data files
+data/
+
 # Idea files
 .DS_Store
 

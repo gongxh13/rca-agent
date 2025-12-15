@@ -128,6 +128,7 @@ def get_running_processes(profiling_type: str) -> List[Dict[str, str]]:
             # 使用 ps 命令获取进程列表
             if profiling_type == 'python':
                 # 只获取Python进程
+                # 使用 ps aux 获取所有进程，然后过滤Python进程
                 cmd = ['ps', 'aux']
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                 
@@ -138,9 +139,23 @@ def get_running_processes(profiling_type: str) -> List[Dict[str, str]]:
                         parts = line.split(None, 10)  # 最多分割10次
                         if len(parts) >= 11:
                             pid = parts[1]
+                            if not pid.isdigit():
+                                continue
+                            
                             cmdline = parts[10] if len(parts) > 10 else ' '.join(parts[2:])
-                            # 只包含Python进程
-                            if 'python' in cmdline.lower() and pid.isdigit():
+                            
+                            # Python进程检测逻辑：
+                            # 检查命令行中是否包含 'python'（不区分大小写）
+                            # 这样可以检测到：
+                            # - python app.py
+                            # - python3 app.py  
+                            # - /usr/bin/python3 app.py
+                            # - python -m flask run
+                            # - python -m gunicorn app:app
+                            # - /usr/bin/python3 -m flask run
+                            # 注意：即使使用 flask run 或 gunicorn 直接启动，
+                            # 底层仍然是Python进程，命令行中通常会显示Python解释器路径
+                            if 'python' in cmdline.lower():
                                 processes.append({
                                     'pid': int(pid),
                                     'name': parts[10].split()[0] if parts[10] else 'python',
@@ -268,20 +283,26 @@ async def collect_flamegraph(console: Console) -> Optional[str]:
     console.print(f"[bold green]✓ 已选择进程: PID {pid}[/bold green]")
     console.print()
     
+    # 获取默认的火焰图存储目录（当前路径下的 data/flamegraphs/）
+    default_flamegraph_dir = os.path.join(os.getcwd(), "data", "flamegraphs")
+    
     # 选择输出路径（提供默认选项或手动输入）
     output_dir_choice = run_inquirer_sync(
         lambda: inquirer.select(
             message="选择输出目录:",
             choices=[
+                Choice(value="data", name=f"data/flamegraphs/ - 项目数据目录（推荐）"),
                 Choice(value="tmp", name=f"/tmp - 系统临时目录"),
                 Choice(value="current", name=f"{os.getcwd()} - 当前目录"),
                 Choice(value="custom", name="自定义路径")
             ],
-            default="tmp"
+            default="data"
         )
     )
     
-    if output_dir_choice == "tmp":
+    if output_dir_choice == "data":
+        output_dir = default_flamegraph_dir
+    elif output_dir_choice == "tmp":
         output_dir = "/tmp"
     elif output_dir_choice == "current":
         output_dir = os.getcwd()
@@ -289,20 +310,26 @@ async def collect_flamegraph(console: Console) -> Optional[str]:
         output_dir = run_inquirer_sync(
             lambda: inquirer.text(
                 message="请输入输出目录路径:",
-                default="/tmp"
+                default=default_flamegraph_dir
             )
         )
+    
+    # 确保输出目录是绝对路径
+    output_dir = os.path.abspath(output_dir)
     
     # 确保目录存在
     if not os.path.exists(output_dir):
         try:
             os.makedirs(output_dir, exist_ok=True)
+            console.print(f"[bold green]✓ 已创建目录: {output_dir}[/bold green]")
         except Exception as e:
             console.print(f"[bold red]无法创建目录 {output_dir}: {e}[/bold red]")
             return None
     
     output_filename = f"flamegraph_{int(time.time())}.svg"
     output_path = os.path.join(output_dir, output_filename)
+    # 确保输出路径是绝对路径
+    output_path = os.path.abspath(output_path)
     
     console.print(f"[bold cyan]输出路径: {output_path}[/bold cyan]")
     console.print()
@@ -444,7 +471,14 @@ def find_flamegraph_files(search_dirs: List[str] = None) -> List[Dict[str, str]]
         找到的火焰图文件列表，每个文件包含 path 和 name
     """
     if search_dirs is None:
-        search_dirs = ["/tmp", os.getcwd(), os.path.expanduser("~/")]
+        # 默认搜索目录：优先搜索项目数据目录，然后是其他常见位置
+        default_flamegraph_dir = os.path.join(os.getcwd(), "data", "flamegraphs")
+        search_dirs = [
+            default_flamegraph_dir,  # 项目数据目录（优先）
+            "/tmp",
+            os.getcwd(),
+            os.path.expanduser("~/")
+        ]
     
     flamegraph_files = []
     seen_files = set()
@@ -580,12 +614,19 @@ def get_user_input(console: Console) -> tuple[str, str]:
     console.print("[dim]提示: 可以询问性能瓶颈、CPU占用最高的函数、优化建议等问题[/dim]")
     console.print()
     
-    question = run_inquirer_sync(
-        lambda: inquirer.text(
-            message="请输入您的问题:",
-            default="请分析这个火焰图，找出CPU占用最高的函数和性能瓶颈"
+    while True:
+        question = run_inquirer_sync(
+            lambda: inquirer.text(
+                message="请输入您的问题:",
+                default="请分析这个火焰图，找出CPU占用最高的函数和性能瓶颈"
+            )
         )
-    )
+        
+        if question and question.strip():
+            break
+        else:
+            console.print("[bold yellow]问题不能为空，请重新输入[/bold yellow]")
+            console.print()
     
     return flamegraph_path, question
 
@@ -727,6 +768,8 @@ async def main():
             
             flamegraph_path = None
             
+            user_question = ""
+            
             if mode == "collect":
                 # 采集模式
                 flamegraph_path = await collect_flamegraph(console)
@@ -746,14 +789,31 @@ async def main():
                 
                 if not analyze_after_collect:
                     continue
+                
+                # 获取用户问题
+                console.print()
+                console.print(Rule("[bold cyan]请输入分析问题[/bold cyan]", style="cyan"))
+                console.print()
+                console.print("[dim]提示: 可以询问性能瓶颈、CPU占用最高的函数、优化建议等问题[/dim]")
+                console.print()
+                
+                while True:
+                    user_question = run_inquirer_sync(
+                        lambda: inquirer.text(
+                            message="请输入您的问题:",
+                            default="请分析这个火焰图，找出CPU占用最高的函数和性能瓶颈"
+                        )
+                    )
+                    
+                    if user_question and user_question.strip():
+                        break
+                    else:
+                        console.print("[bold yellow]问题不能为空，请重新输入[/bold yellow]")
+                        console.print()
             
             else:
-                # 文件模式：获取用户输入
+                # 文件模式：获取用户输入（文件路径和问题）
                 flamegraph_path, user_question = get_user_input(console)
-            
-            # 如果采集后选择分析，使用默认问题
-            if mode == "collect" and flamegraph_path:
-                user_question = "请分析这个火焰图，找出CPU占用最高的函数和性能瓶颈"
             
             # 执行分析（确保有文件路径）
             if flamegraph_path:
