@@ -22,6 +22,8 @@ from typing import Optional, List, Dict
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+from langchain_core.tools import StructuredTool
+
 dotenv.load_dotenv()
 
 # Configure logging
@@ -64,16 +66,10 @@ from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 from src.agents.flamegraph_agents import create_flamegraph_analysis_agent
 from src.utils.streaming_output import StreamingOutputHandler, stream_agent_execution
-from src.tools.flamegraph_cpu_analyzer import (
-    start_flamegraph_profiling as _start_flamegraph_profiling_tool,
-    stop_flamegraph_profiling as _stop_flamegraph_profiling_tool,
-    list_profiling_tasks as _list_profiling_tasks_tool
-)
+from src.tools.flamegraph_cpu_analyzer import FlamegraphProfilingTool
 
-# 从工具对象中提取底层函数
-start_flamegraph_profiling = _start_flamegraph_profiling_tool.func
-stop_flamegraph_profiling = _stop_flamegraph_profiling_tool.func
-list_profiling_tasks = _list_profiling_tasks_tool.func
+# 创建火焰图采集工具实例
+_profiling_tool = FlamegraphProfilingTool()
 
 
 def setup_agent():
@@ -384,16 +380,13 @@ async def collect_flamegraph(console: Console) -> Optional[str]:
     console.print(f"[bold cyan]正在启动{profiling_type}采集...[/bold cyan]")
     
     try:
-        result_json = await start_flamegraph_profiling(
+        result = await _profiling_tool.start_flamegraph_profiling(
             profiling_type=profiling_type,
             output_path=output_path,
             pid=pid,
             duration=duration,
             rate=rate
         )
-        
-        import json
-        result = json.loads(result_json)
         
         if not result.get('success'):
             console.print(f"[bold red]启动采集失败: {result.get('error')}[/bold red]")
@@ -413,15 +406,24 @@ async def collect_flamegraph(console: Console) -> Optional[str]:
             console.print("[bold cyan]正在停止采集并生成火焰图...[/bold cyan]")
         
         # 停止采集
-        stop_result_json = await stop_flamegraph_profiling(task_id)
-        stop_result = json.loads(stop_result_json)
+        stop_result = await _profiling_tool.stop_flamegraph_profiling(task_id)
         
         if stop_result.get('success'):
             output_file = stop_result.get('output_path')
-            console.print(f"[bold green]✓ 采集完成，火焰图已生成: {output_file}[/bold green]")
-            return output_file
+            if output_file and os.path.exists(output_file):
+                file_size = os.path.getsize(output_file)
+                console.print(f"[bold green]✓ 采集完成，火焰图已生成: {output_file} ({file_size} 字节)[/bold green]")
+                return output_file
+            else:
+                console.print(f"[bold yellow]警告: 采集已停止，但文件未找到: {output_file}[/bold yellow]")
+                if stop_result.get('error'):
+                    console.print(f"[bold red]错误信息: {stop_result.get('error')}[/bold red]")
+                return None
         else:
-            console.print(f"[bold red]停止采集失败: {stop_result.get('error')}[/bold red]")
+            error_msg = stop_result.get('error', '未知错误')
+            console.print(f"[bold red]停止采集失败: {error_msg}[/bold red]")
+            if stop_result.get('output_path'):
+                console.print(f"[dim]预期输出路径: {stop_result.get('output_path')}[/dim]")
             return None
             
     except Exception as e:

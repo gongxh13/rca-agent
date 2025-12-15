@@ -259,38 +259,56 @@ class StreamingOutputHandler:
             if msg_id in self.message_metadata:
                 del self.message_metadata[msg_id]
     
+    def get_last_message_content(self) -> Optional[str]:
+        """
+        获取最后一条消息的内容
+        
+        Returns:
+            最后一条消息的内容，如果没有则返回 None
+        """
+        # 优先返回当前正在流式输出的消息
+        if self.current_streaming_msg_id and self.current_streaming_msg_id in self.accumulated_texts:
+            content = self.accumulated_texts[self.current_streaming_msg_id]
+            if content:
+                return content
+        
+        # 如果没有当前流式消息，返回最后一条有内容的消息
+        if self.accumulated_texts:
+            # 获取最后一条消息（按消息id顺序，或直接取任意一条）
+            for msg_id in reversed(list(self.accumulated_texts.keys())):
+                content = self.accumulated_texts[msg_id]
+                if content:
+                    return content
+        
+        return None
+    
     def finalize_all(self) -> None:
-        """完成所有流式输出，显示最终结果"""
+        """完成所有流式输出，只显示最后一条消息的最终结果"""
         # 停止 Live 实例
         if self.live is not None:
             self.live.stop()
             self.live = None
         
-        # 如果有正在流式输出的消息，先完成它
+        # 只打印最后一条消息（当前正在流式输出的消息）
         if self.current_streaming_msg_id:
             if self.current_streaming_msg_id in self.accumulated_texts and self.accumulated_texts[self.current_streaming_msg_id]:
                 final_panel = self._get_display_panel_for_message(self.current_streaming_msg_id)
                 self.console.print(final_panel)
-                del self.accumulated_texts[self.current_streaming_msg_id]
-                if self.current_streaming_msg_id in self.message_metadata:
-                    del self.message_metadata[self.current_streaming_msg_id]
-        
-        # 确保所有未完成的流式消息都被显示
-        for msg_id in list(self.accumulated_texts.keys()):
-            if self.accumulated_texts[msg_id]:
-                final_panel = self._get_display_panel_for_message(msg_id)
-                self.console.print(final_panel)
-                del self.accumulated_texts[msg_id]
-                if msg_id in self.message_metadata:
-                    del self.message_metadata[msg_id]
-        
-        # 清空所有跟踪
-        self.current_streaming_msg_id = None
+                # 不清空，保留内容以便后续获取（在 cleanup 中清理）
         
         # 打印分隔线
         self.console.print()
         self.console.print(Rule(style="dim"))
         self.console.print()
+    
+    def cleanup(self) -> None:
+        """清理所有资源，释放内存"""
+        # 清空所有累积的消息
+        self.accumulated_texts.clear()
+        self.message_metadata.clear()
+        self.current_custom.clear()
+        self.current_updates.clear()
+        self.current_streaming_msg_id = None
 
 
 async def stream_agent_execution(
@@ -397,66 +415,12 @@ async def stream_agent_execution(
         # 完成所有流式输出
         handler.finalize_all()
     
-    # 从最后一次更新状态构建最终结果
-    if last_update_state:
-        # 尝试从更新状态中提取最终消息
-        final_messages = []
-        for node_name, node_data in last_update_state.items():
-            messages = node_data.get("messages", [])
-            
-            # 处理 messages 可能是 Overwrite 对象或其他类型的情况
-            if not messages:
-                continue
-            
-            # 检查 messages 是否是列表
-            if not isinstance(messages, list):
-                # 如果不是列表，尝试获取其值或转换为列表
-                if hasattr(messages, "value"):
-                    messages = messages.value if isinstance(messages.value, list) else [messages.value]
-                elif hasattr(messages, "__iter__") and not isinstance(messages, str):
-                    try:
-                        messages = list(messages)
-                    except (TypeError, ValueError):
-                        continue
-                else:
-                    continue
-            
-            if messages:
-                final_messages.extend(messages)
-        
-        if final_messages:
-            # 获取最后一条消息作为输出
-            try:
-                last_message = final_messages[-1]
-            except (IndexError, TypeError):
-                final_result = {"output": "No output", "messages": []}
-            else:
-                if hasattr(last_message, "content"):
-                    if isinstance(last_message.content, str):
-                        final_result = {"output": last_message.content, "messages": final_messages}
-                    else:
-                        # 处理 content_blocks 格式
-                        output_text = ""
-                        if isinstance(last_message.content, list):
-                            for item in last_message.content:
-                                if isinstance(item, dict) and item.get("type") == "text":
-                                    output_text += item.get("text", "")
-                        final_result = {"output": output_text, "messages": final_messages}
-                elif isinstance(last_message, dict):
-                    # 如果消息是字典格式
-                    content = last_message.get("content", "")
-                    if isinstance(content, str):
-                        final_result = {"output": content, "messages": final_messages}
-                    else:
-                        final_result = {"output": str(last_message), "messages": final_messages}
-                else:
-                    final_result = {"output": str(last_message), "messages": final_messages}
-        else:
-            final_result = {"output": "No output", "messages": []}
-    else:
-        # 如果没有更新状态，尝试获取最终结果
-        # 注意：这里不再次调用 agent，因为流式执行已经完成
-        final_result = {"output": "Streaming completed", "messages": []}
+    # 从流式输出中获取最后一条消息的内容作为最终结果
+    last_message_content = handler.get_last_message_content()
+    if last_message_content:
+        final_result = {"output": last_message_content, "messages": []}
+    # 清理资源
+    handler.cleanup()
     
     return final_result
 
