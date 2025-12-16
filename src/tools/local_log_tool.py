@@ -12,6 +12,7 @@ from datetime import datetime
 
 from .log_tool import LogAnalysisTool
 from .data_loader import OpenRCADataLoader
+from ..utils.time_utils import to_iso_shanghai
 
 class LocalLogAnalysisTool(LogAnalysisTool):
     """
@@ -178,7 +179,7 @@ class LocalLogAnalysisTool(LogAnalysisTool):
         result = [f"Detected {len(anomalies)} log volume anomalies:"]
         for a in anomalies[:10]:
             result.append(
-                f"- {a['service']} at {a['time']}: {a['count']} logs/min "
+                f"- {a['service']} at {to_iso_shanghai(a['time'])}: {a['count']} logs/min "
                 f"(Mean: {a['mean']:.1f}, Z-Score: {a['z_score']:.1f})"
             )
             
@@ -328,7 +329,7 @@ class LocalLogAnalysisTool(LogAnalysisTool):
         result.append("=" * 80)
         
         for _, row in df.iterrows():
-            result.append(f"Time: {row['datetime']}")
+            result.append(f"Time: {to_iso_shanghai(row['datetime'])}")
             result.append(f"Service: {row['cmdb_id']}")
             result.append(f"Log: {row['value'][:500]}")  # Truncate very long logs
             if len(row['value']) > 500:

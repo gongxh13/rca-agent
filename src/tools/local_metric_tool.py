@@ -13,6 +13,7 @@ import json
 
 from .metric_tool import MetricAnalysisTool
 from .data_loader import OpenRCADataLoader
+from ..utils.time_utils import to_iso_shanghai
 
 try:
     import ruptures as rpt
@@ -551,39 +552,6 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
                 severity = "中等"
             return f"{severity}（最大值：{max_value:.1f}，偏离：{deviation_pct:.1f}%）"
         
-        def convert_to_shanghai_time(timestamp) -> str:
-            """将时间戳转换为东8区（Asia/Shanghai）的ISO格式字符串"""
-            # 如果已经是pd.Timestamp
-            if isinstance(timestamp, pd.Timestamp):
-                if timestamp.tzinfo is not None:
-                    # 检查是否已经是UTC+08:00或Asia/Shanghai时区
-                    tz_str = str(timestamp.tzinfo)
-                    # UTC+08:00 等同于 Asia/Shanghai
-                    if 'UTC+08:00' in tz_str or 'Asia/Shanghai' in tz_str or (hasattr(timestamp.tzinfo, 'zone') and timestamp.tzinfo.zone == 'Asia/Shanghai'):
-                        # 已经是东8区，直接返回
-                        return timestamp.isoformat()
-                    else:
-                        # 其他时区，转换为Asia/Shanghai
-                        ts = timestamp.tz_convert('Asia/Shanghai')
-                else:
-                    # 如果没有时区，假设是Asia/Shanghai并本地化
-                    ts = timestamp.tz_localize('Asia/Shanghai')
-            else:
-                # 如果是numpy datetime64或其他类型，先转换为pd.Timestamp
-                ts = pd.Timestamp(timestamp)
-                # 如果原始数据有时区信息，需要从DataFrame中获取
-                # 否则假设已经是Asia/Shanghai时区
-                if ts.tzinfo is None:
-                    ts = ts.tz_localize('Asia/Shanghai')
-                else:
-                    # 检查是否已经是UTC+08:00或Asia/Shanghai
-                    tz_str = str(ts.tzinfo)
-                    if 'UTC+08:00' in tz_str or 'Asia/Shanghai' in tz_str or (hasattr(ts.tzinfo, 'zone') and ts.tzinfo.zone == 'Asia/Shanghai'):
-                        pass  # 已经是东8区，不需要转换
-                    else:
-                        ts = ts.tz_convert('Asia/Shanghai')
-            return ts.isoformat()
-        
         # 使用ruptures检测
         def detect_with_ruptures(component: str, kpi_name: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
             if not RUPTURES_AVAILABLE or len(data) < min_data_points_ruptures:
@@ -736,15 +704,15 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
                                 if change_idx < len(datetime_series):
                                     # 直接从DataFrame获取时间戳，保留时区信息
                                     change_time = datetime_series.iloc[change_idx]
-                                    anomalies.append({
-                                        'component_name': component,
-                                        'faulty_kpi': kpi_name,
-                                        'fault_start_time': convert_to_shanghai_time(change_time),
-                                        'severity_score': calculate_severity(deviation_pct, curr_seg['max']),
-                                        'deviation_pct': float(deviation_pct),  # 确保是Python float类型
-                                        'method': 'ruptures',
-                                        'change_idx': int(change_idx)  # 确保是Python int类型
-                                    })
+                            anomalies.append({
+                                'component_name': component,
+                                'faulty_kpi': kpi_name,
+                                'fault_start_time': to_iso_shanghai(change_time),
+                                'severity_score': calculate_severity(deviation_pct, curr_seg['max']),
+                                'deviation_pct': float(deviation_pct),  # 确保是Python float类型
+                                'method': 'ruptures',
+                                'change_idx': int(change_idx)  # 确保是Python int类型
+                            })
             except Exception:
                 pass
             
@@ -895,7 +863,7 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
                             anomalies.append({
                                 'component_name': component,
                                 'faulty_kpi': kpi_name,
-                                'fault_start_time': convert_to_shanghai_time(segment_time),
+                                'fault_start_time': to_iso_shanghai(segment_time),
                                 'severity_score': calculate_severity(deviation_pct, max_value),
                                 'deviation_pct': float(deviation_pct),  # 确保是Python float类型
                                 'method': 'zscore',
@@ -1125,7 +1093,7 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
                         anomalies.append({
                             'component_name': component,
                             'faulty_kpi': kpi_name,
-                            'fault_start_time': convert_to_shanghai_time(segment_time),
+                            'fault_start_time': to_iso_shanghai(segment_time),
                             'severity_score': calculate_severity(deviation_pct, max_value),
                             'deviation_pct': float(deviation_pct),  # 确保是Python float类型
                             'method': 'absolute_threshold',

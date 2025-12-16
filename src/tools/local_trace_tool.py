@@ -12,6 +12,7 @@ import networkx as nx
 
 from .trace_tool import TraceAnalysisTool
 from .data_loader import OpenRCADataLoader
+from ..utils.time_utils import to_iso_shanghai
 
 class LocalTraceAnalysisTool(TraceAnalysisTool):
     """
@@ -62,7 +63,7 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
             result.append(
                 f"- Service: {row['cmdb_id']}, Duration: {row['duration']}ms, "
                 f"TraceID: {row['trace_id']}, SpanID: {row['span_id']}, "
-                f"Time: {row['datetime']}"
+                f"Time: {to_iso_shanghai(row['datetime'])}"
             )
             
         return "\n".join(result)
