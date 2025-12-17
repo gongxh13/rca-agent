@@ -27,10 +27,32 @@ from langchain_core.tools import StructuredTool
 from typing_extensions import Annotated, Doc
 
 from langchain.tools import BaseTool, tool
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _create_tool_description(f):
+    tool_result = tool(f, parse_docstring=True)
+    return dict(description=tool_result.description, args_schema=tool_result.args_schema)
+
+def _default_flamegraph_output_path(prefix: str = "flamegraph_auto") -> str:
+    """
+    Generate a default SVG output path when the caller (LLM) doesn't provide one.
+    Preference order:
+    1) <cwd>/data/flamegraphs/
+    2) /tmp
+    """
+    ts = int(time.time())
+    try:
+        base_dir = os.path.abspath(os.path.join(os.getcwd(), "data", "flamegraphs"))
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, f"{prefix}_{ts}.svg")
+    except Exception:
+        return os.path.join("/tmp", f"{prefix}_{ts}.svg")
 
 
 def _get_current_script_path() -> Optional[str]:
@@ -238,11 +260,184 @@ class FlamegraphProfilingTool:
     def __init__(self):
         """初始化火焰图采集工具"""
         self.active_profiling_tasks: Dict[str, Dict] = {}
+
+    def get_tools(self) -> List[Any]:
+        """
+        将采集生命周期能力封装为 LangChain Tool（同步 func + 异步 coroutine）。
+
+        设计目标：
+        - 不在模块级别额外堆很多 wrapper 函数
+        - 复用同一个 FlamegraphProfilingTool 实例，以共享 active_profiling_tasks 状态
+        """
+        try:
+            from langchain.tools import Tool  # type: ignore
+        except Exception:  # pragma: no cover
+            try:
+                from langchain_core.tools import Tool  # type: ignore
+            except Exception:  # pragma: no cover
+                return []
+
+        # 用于在 sync 环境调用 async（尤其是已有事件循环时）
+        _executor = ThreadPoolExecutor(max_workers=1)
+
+        def _run_coro_sync(coro):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                future = _executor.submit(lambda: asyncio.run(coro))
+                return future.result()
+            return asyncio.run(coro)
+
+        async def _start_async(
+            profiling_type: str,
+            output_path: Optional[str] = None,
+            pid: Optional[int] = None,
+            duration: Optional[int] = None,
+            rate: int = 100,
+            task_id: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            return await self.start_flamegraph_profiling(
+                profiling_type=profiling_type,
+                output_path=output_path,
+                pid=pid,
+                duration=duration,
+                rate=rate,
+                task_id=task_id,
+            )
+
+        def _start_sync(
+            profiling_type: str,
+            output_path: Optional[str] = None,
+            pid: Optional[int] = None,
+            duration: Optional[int] = None,
+            rate: int = 100,
+            task_id: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            """
+            启动火焰图采集任务。
+
+            Args:
+                profiling_type: 采集类型，'python' 使用 py-spy，'perf' 使用 perf。
+                output_path: 输出火焰图 SVG 文件路径（可选；不填会自动生成）。
+                pid: 目标进程 ID（可选；如提供则采集该进程）。
+                duration: 采集时长（秒，可选）。若为 None 则持续采集直到手动停止。
+                rate: 采样频率（Hz），默认 100。
+                task_id: 任务 ID（可选；不填会自动生成）。
+
+            Returns:
+                结果字典，包含 success、task_id、output_path 等信息；失败时包含 error。
+            """
+            return _run_coro_sync(
+                _start_async(
+                    profiling_type=profiling_type,
+                    output_path=output_path,
+                    pid=pid,
+                    duration=duration,
+                    rate=rate,
+                    task_id=task_id,
+                )
+            )
+
+        async def _stop_async(task_id: str) -> Dict[str, Any]:
+            return await self.stop_flamegraph_profiling(task_id=task_id)
+
+        def _stop_sync(task_id: str) -> Dict[str, Any]:
+            """
+            停止指定 task_id 的火焰图采集任务并生成火焰图（SVG）。
+
+            Args:
+                task_id: 要停止的任务 ID。
+
+            Returns:
+                结果字典，包含 success、output_path 等信息；失败时包含 error。
+            """
+            return _run_coro_sync(_stop_async(task_id=task_id))
+
+        async def _list_async() -> Dict[str, Any]:
+            return await self.list_profiling_tasks()
+
+        def _list_sync() -> Dict[str, Any]:
+            """
+            列出当前活跃的火焰图采集任务。
+
+            Returns:
+                结果字典，包含 tasks 列表与 count。
+            """
+            return _run_coro_sync(_list_async())
+
+        def _collect_sync(
+            profiling_type: str,
+            output_path: Optional[str] = None,
+            pid: Optional[int] = None,
+            duration: int = 60,
+            rate: int = 100,
+            task_id: Optional[str] = None,
+            wait_timeout_buffer: int = 30,
+            poll_interval: float = 0.5,
+        ) -> Dict[str, Any]:
+            """
+            阻塞式采集火焰图（同步包装）。
+
+            Args:
+                profiling_type: 采集类型，'python' 使用 py-spy，'perf' 使用 perf。
+                output_path: 输出火焰图 SVG 文件路径（可选；不填会自动生成）。
+                pid: 目标进程 ID（可选；如提供则采集该进程）。
+                duration: 采集时长（秒），默认 60。
+                rate: 采样频率（Hz），默认 100。
+                task_id: 任务 ID（可选；不填会自动生成）。
+                wait_timeout_buffer: 额外等待缓冲时间（秒），默认 30。
+                poll_interval: 轮询间隔（秒），默认 0.5。
+
+            Returns:
+                结果字典，包含 success、task_id、output_path 等信息；失败时包含 error。
+            """
+            return _run_coro_sync(
+                self.collect_flamegraph_profiling(
+                    profiling_type=profiling_type,
+                    output_path=output_path,
+                    pid=pid,
+                    duration=duration,
+                    rate=rate,
+                    task_id=task_id,
+                    wait_timeout_buffer=wait_timeout_buffer,
+                    poll_interval=poll_interval,
+                )
+            )
+
+        return [
+            StructuredTool.from_function(
+                func=_collect_sync,
+                name="flamegraph_collect_profiling",
+                coroutine=self.collect_flamegraph_profiling,
+                **_create_tool_description(_collect_sync),
+            ),
+            StructuredTool.from_function(
+                func=_start_sync,
+                name="flamegraph_start_profiling",
+                coroutine=_start_async,
+                **_create_tool_description(_start_sync),
+            ),
+            StructuredTool.from_function(
+                func=_stop_sync,
+                name="flamegraph_stop_profiling",
+                coroutine=_stop_async,
+                **_create_tool_description(_stop_sync),
+            ),
+            StructuredTool.from_function(
+                func=_list_sync,
+                name="flamegraph_list_profiling_tasks",
+                coroutine=_list_async,
+                **_create_tool_description(_list_sync),
+            ),
+        ]
     
     async def start_flamegraph_profiling(
         self,
         profiling_type: Annotated[str, Doc("采集类型：'python' 使用 py-spy，'perf' 使用 perf")],
-        output_path: Annotated[str, Doc("输出火焰图SVG文件的路径")],
+        output_path: Annotated[Optional[str], Doc("输出火焰图SVG文件的路径（可选；不填会自动生成）")] = None,
         pid: Annotated[Optional[int], Doc("目标进程ID（可选，如果提供则监控该进程）")] = None,
         duration: Annotated[Optional[int], Doc("采集时长（秒），如果为None则持续采集直到手动停止")] = None,
         rate: Annotated[int, Doc("采样频率（Hz），默认100")] = 100,
@@ -267,6 +462,9 @@ class FlamegraphProfilingTool:
             字典，包含任务ID和状态信息
         """
         try:
+            if not output_path:
+                output_path = _default_flamegraph_output_path(prefix=f"flamegraph_{profiling_type}")
+
             # 在 macOS 上检查权限（需要 root 权限才能采集其他进程）
             # 必须在函数开始时就检查，避免后续操作浪费资源
             if profiling_type == 'python' and platform.system() == 'Darwin' and pid:
@@ -397,15 +595,16 @@ class FlamegraphProfilingTool:
             }
             self.active_profiling_tasks[task_id] = task_info
             
-            # 如果有持续时间限制，启动异步定时任务
-            if duration:
-                async def stop_after_duration():
-                    await asyncio.sleep(duration)
-                    if task_id in self.active_profiling_tasks:
-                        await self.stop_flamegraph_profiling(task_id)
-                
-                # 创建后台任务
-                asyncio.create_task(stop_after_duration())
+            # 注意：
+            # - 对于 python/py-spy：如果传入 duration，我们通过 py-spy 的 -d 参数让其自行到时退出并写出 SVG；
+            #   因此这里不再创建后台 asyncio task 来做定时 stop，避免“任务启动”接口语义变得混乱且不可靠。
+            # - 对于 perf：其 record 进程默认不会因 duration 自动退出（除非另行实现超时终止），建议使用
+            #   collect_flamegraph_profiling/flamegraph_collect_profiling（阻塞式采集）或手动 stop。
+            if profiling_type == 'perf' and duration:
+                logger.warning(
+                    "perf 采集收到 duration 参数，但 perf record 默认不会自动停止；"
+                    "建议使用 collect_flamegraph_profiling 进行阻塞式采集或手动 stop。"
+                )
             
             return {
                 'success': True,
@@ -423,6 +622,83 @@ class FlamegraphProfilingTool:
                 'success': False,
                 'error': f'启动采集失败: {str(e)}'
             }
+
+    async def collect_flamegraph_profiling(
+        self,
+        profiling_type: Annotated[str, Doc("采集类型：'python' 使用 py-spy，'perf' 使用 perf")],
+        output_path: Annotated[Optional[str], Doc("输出火焰图SVG文件的路径（可选；不填会自动生成）")] = None,
+        pid: Annotated[Optional[int], Doc("目标进程ID（可选，如果提供则监控该进程）")] = None,
+        duration: Annotated[int, Doc("采集时长（秒），默认60；该工具会阻塞直到采集完成或失败")] = 60,
+        rate: Annotated[int, Doc("采样频率（Hz），默认100")] = 100,
+        task_id: Annotated[Optional[str], Doc("任务ID（可选，自动生成）")] = None,
+        wait_timeout_buffer: Annotated[int, Doc("额外等待缓冲时间（秒），默认30，用于生成文件等收尾")] = 30,
+        poll_interval: Annotated[float, Doc("轮询间隔（秒），默认0.5")] = 0.5,
+    ) -> Dict:
+        """
+        阻塞式采集火焰图（单次调用完成采集与收尾）。
+
+        启动采集任务并阻塞等待采集完成/失败，然后调用 stop 做统一清理与输出校验，
+        最终返回包含 output_path 的结果。适用于 Agent：模型只需要调用一次工具。
+
+        Args:
+            profiling_type: 采集类型，'python' 使用 py-spy，'perf' 使用 perf。
+            output_path: 输出火焰图 SVG 文件路径（可选；不填会自动生成）。
+            pid: 目标进程 ID（可选；如提供则采集该进程）。
+            duration: 采集时长（秒），默认 60。该工具会阻塞直到采集完成或失败。
+            rate: 采样频率（Hz），默认 100。
+            task_id: 任务 ID（可选；不填会自动生成）。
+            wait_timeout_buffer: 额外等待缓冲时间（秒），默认 30，用于生成文件等收尾。
+            poll_interval: 轮询间隔（秒），默认 0.5。
+
+        Returns:
+            结果字典，包含 success、task_id、output_path 等信息；失败时包含 error。
+        """
+        if not output_path:
+            output_path = _default_flamegraph_output_path(prefix="flamegraph_collect")
+
+        start_result = await self.start_flamegraph_profiling(
+            profiling_type=profiling_type,
+            output_path=output_path,
+            pid=pid,
+            duration=duration,
+            rate=rate,
+            task_id=task_id,
+        )
+        if not start_result.get("success"):
+            return start_result
+
+        task_id = start_result.get("task_id")
+        if not task_id:
+            return {
+                "success": False,
+                "error": "启动采集成功但未返回 task_id，无法继续等待/停止。",
+            }
+
+        # 等待采集完成/到时后停止：
+        # - python/py-spy：传入 -d 后进程会自行到时退出并生成 SVG，因此等待进程退出后再 stop 做统一校验/清理
+        # - perf：record 进程不会自动退出，因此这里必须 await(duration) 后主动 stop（发送 SIGINT）
+        if profiling_type == "perf":
+            await asyncio.sleep(max(0, int(duration)))
+            return await self.stop_flamegraph_profiling(task_id=task_id)
+
+        # 默认按 python/py-spy 的等待策略：等进程退出（或超时）后再 stop
+        start_ts = time.time()
+        while True:
+            task_info = self.active_profiling_tasks.get(task_id)
+            if not task_info:
+                break
+
+            process = task_info.get("process")
+            if process is not None and process.poll() is not None:
+                break
+
+            elapsed = time.time() - start_ts
+            if elapsed >= float(duration + wait_timeout_buffer):
+                break
+
+            await asyncio.sleep(poll_interval)
+
+        return await self.stop_flamegraph_profiling(task_id=task_id)
     
     async def stop_flamegraph_profiling(
         self,
@@ -680,6 +956,14 @@ class FlamegraphProfilingTool:
                 'success': False,
                 'error': f'获取任务列表失败: {str(e)}'
             }
+
+
+def _get_flamegraph_profiling_tools() -> List[Any]:
+    """
+    Backward compatible helper so existing code can still import a flat list.
+    Prefer using FlamegraphProfilingTool.get_tools() on a shared instance.
+    """
+    return FlamegraphProfilingTool().get_tools()
 
 async def _fetch_flamegraph_svg(profile_path: str) -> Optional[str]:
     """

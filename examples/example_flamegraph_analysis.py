@@ -64,7 +64,10 @@ from rich.rule import Rule
 from rich.table import Table
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
-from src.agents.flamegraph_agents import create_flamegraph_analysis_agent
+from src.agents.flamegraph_agents import (
+    create_flamegraph_analysis_agent,
+    create_flamegraph_auto_profiling_agent,
+)
 from src.utils.streaming_output import StreamingOutputHandler, stream_agent_execution
 from src.tools.flamegraph_cpu_analyzer import FlamegraphProfilingTool
 
@@ -89,10 +92,8 @@ def setup_agent():
             model="deepseek-chat"
         )
         
-        flamegraph_agent = create_flamegraph_analysis_agent(
-            model=model,
-            config={}
-        )
+        # Default: analysis-only agent. Some modes will create auto-profiling agent dynamically.
+        flamegraph_agent = create_flamegraph_analysis_agent(model=model, config={})
         
         return flamegraph_agent, langfuse_handler
         
@@ -725,7 +726,7 @@ async def main():
     console.print(Rule("[bold cyan]Flamegraph Analysis Agent - CPU性能分析[/bold cyan]", style="cyan"))
     console.print()
     
-    # Initialize agent
+    # Initialize agent (analysis-only by default)
     console.print()
     console.print(Rule("[bold yellow]初始化 Flamegraph Analysis Agent...[/bold yellow]", style="yellow"))
     console.print()
@@ -751,17 +752,19 @@ async def main():
                 lambda: inquirer.select(
                     message="请选择操作模式:",
                     choices=[
+                        Choice(value="auto", name="自动采集并分析（推荐）- 适合“CPU占用高，帮我分析”"),
                         Choice(value="file", name="分析已有文件 - 分析已存在的火焰图SVG文件"),
-                        Choice(value="collect", name="采集新文件 - 实时采集进程的CPU火焰图")
+                        Choice(value="collect", name="采集新文件 - 实时采集进程的CPU火焰图"),
                     ],
-                    default="file"
+                    default="auto"
                 )
             )
             
             # 显示选中的模式
             mode_names = {
                 "file": "分析已有文件",
-                "collect": "采集新文件"
+                "collect": "采集新文件",
+                "auto": "自动采集并分析（推荐）",
             }
             console.print(f"[bold green]✓ 已选择: {mode_names[mode]}[/bold green]")
             console.print()
@@ -770,7 +773,110 @@ async def main():
             
             user_question = ""
             
-            if mode == "collect":
+            if mode == "auto":
+                # 自动采集并分析：使用具备采集工具的 agent
+                from langchain_deepseek import ChatDeepSeek
+                model = ChatDeepSeek(model="deepseek-chat")
+                agent = create_flamegraph_auto_profiling_agent(model=model, config={})
+
+                console.print()
+                console.print(Rule("[bold cyan]自动采集并分析（推荐）[/bold cyan]", style="cyan"))
+                console.print()
+                console.print("[dim]提示: 该模式会自动采集一段时间的CPU火焰图，然后基于采集结果给出分析报告。[/dim]")
+
+                # 自动模式：不要求用户选择进程，交给模型通过 shell_exec 自行发现可疑 PID
+                profiling_type = run_inquirer_sync(
+                    lambda: inquirer.select(
+                        message="请选择采集类型（如果不确定，选 Python；模型会根据进程情况调整）:",
+                        choices=[
+                            Choice(value="python", name="Python - 优先用于 Python 进程（py-spy）"),
+                            Choice(value="perf", name="Perf - 用于任意进程（需要 perf 工具）")
+                        ],
+                        default="python"
+                    )
+                )
+
+                # 自动模式默认采集 60 秒
+                duration = int(run_inquirer_sync(
+                    lambda: inquirer.select(
+                        message="请选择采集时长:",
+                        choices=[
+                            Choice(value="30", name="30秒"),
+                            Choice(value="60", name="60秒 - 推荐"),
+                            Choice(value="120", name="120秒"),
+                            Choice(value="custom", name="自定义时长")
+                        ],
+                        default="60"
+                    )
+                ))
+                if duration == "custom":  # type: ignore[comparison-overlap]
+                    duration = int(run_inquirer_sync(
+                        lambda: inquirer.number(
+                            message="请输入采集时长 (秒):",
+                            default=60,
+                            min_allowed=1,
+                            max_allowed=3600
+                        )
+                    ))
+
+                rate = int(run_inquirer_sync(
+                    lambda: inquirer.select(
+                        message="请选择采样频率:",
+                        choices=[
+                            Choice(value="50", name="50 Hz"),
+                            Choice(value="100", name="100 Hz - 推荐"),
+                            Choice(value="200", name="200 Hz"),
+                            Choice(value="custom", name="自定义频率")
+                        ],
+                        default="100"
+                    )
+                ))
+                if rate == "custom":  # type: ignore[comparison-overlap]
+                    rate = int(run_inquirer_sync(
+                        lambda: inquirer.number(
+                            message="请输入采样频率 (Hz):",
+                            default=100,
+                            min_allowed=1,
+                            max_allowed=1000
+                        )
+                    ))
+
+                # 输出目录：默认 data/flamegraphs
+                default_flamegraph_dir = os.path.join(os.getcwd(), "data", "flamegraphs")
+                os.makedirs(default_flamegraph_dir, exist_ok=True)
+                output_path = os.path.abspath(
+                    os.path.join(default_flamegraph_dir, f"flamegraph_auto_{int(time.time())}.svg")
+                )
+
+                # 构造一个让 agent 自动采集并分析的自然语言请求
+                user_question = run_inquirer_sync(
+                    lambda: inquirer.text(
+                        message="请输入你的排障诉求（可选）:",
+                        default="我当前机器CPU占用比较高，帮我分析主要问题"
+                    )
+                ).strip()
+
+                auto_request = f"""
+我这台机器 CPU 占用比较高，请你自动采集并分析主要问题。
+
+请先使用 ShellToolMiddleware 提供的 Shell 工具查询当前 CPU 占用最高的进程，并自动选择最可疑的目标 pid（必要时再向我确认一次）。
+
+采集参数：
+- profiling_type: {profiling_type}
+- duration: {duration}
+- rate: {rate}
+- output_path: {output_path}
+
+诉求：
+{user_question}
+
+请使用 flamegraph_collect_profiling 做阻塞式采集（一次调用闭环），采集结束后对生成的 SVG 做 overview 并钻取热点函数，给出分析报告。
+                """.strip()
+
+                # 通过 agent 来执行自动采集 + 分析
+                await run_analysis(agent, langfuse_handler, console, flamegraph_path="", user_question=auto_request)
+
+            elif mode == "collect":
                 # 采集模式
                 flamegraph_path = await collect_flamegraph(console)
                 
@@ -815,10 +921,10 @@ async def main():
                 # 文件模式：获取用户输入（文件路径和问题）
                 flamegraph_path, user_question = get_user_input(console)
             
-            # 执行分析（确保有文件路径）
-            if flamegraph_path:
+            # 执行分析（确保有文件路径）——auto 模式已在上面执行
+            if flamegraph_path and mode != "auto":
                 await run_analysis(agent, langfuse_handler, console, flamegraph_path, user_question)
-            else:
+            elif mode != "auto":
                 console.print("[bold yellow]未提供火焰图文件路径，跳过分析[/bold yellow]")
             
             # 询问是否继续
