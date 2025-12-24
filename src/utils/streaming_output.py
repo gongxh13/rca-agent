@@ -14,6 +14,8 @@ import uuid
 import json
 import time
 import codecs
+import sys
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 from rich.console import Console
@@ -102,7 +104,7 @@ def fix_utf8_encoding(text: str) -> str:
 async def handle_interrupt(
     interrupt_data: Any,
     console: Console,
-    live: Optional[Live]
+    handler: Optional['StreamingOutputHandler'] = None
 ) -> Tuple[str, Any]:
     """
     处理中断事件，获取用户决策或输入
@@ -110,7 +112,7 @@ async def handle_interrupt(
     Args:
         interrupt_data: 中断数据，可能是 Interrupt 对象的 tuple 或单个 Interrupt，或自定义格式
         console: Rich Console 实例
-        live: Live 实例（如果有的话，需要先停止）
+        handler: StreamingOutputHandler 实例（如果有的话，需要先停止其 Live 显示）
         
     Returns:
         tuple[str, Any]: 
@@ -118,8 +120,10 @@ async def handle_interrupt(
         - 如果是自定义格式，返回 ("text", user_input_string)
     """
     # 停止 Live 显示（如果有）
-    if live is not None:
-        live.stop()
+    if handler is not None and handler.live is not None:
+        handler.live.stop()
+        handler.live = None  # 重要：设置为 None，以便后续重新创建
+        handler.current_streaming_msg_id = None  # 同时重置当前流式消息id
     
     # 提取实际的 HITL 请求数据
     hitl_request = None
@@ -641,15 +645,80 @@ class StreamingOutputHandler:
             # 更新当前消息的内容
             self.accumulated_texts[msg_id] += content
             
-            # 如果还没有 Live 实例，创建一个（全局单一实例）
-            if self.live is None:
+            # 如果还没有 Live 实例，或者 Live 实例已停止，创建一个（全局单一实例）
+            # 检查 Live 实例是否还在运行（通过检查内部状态）
+            live_needs_restart = False
+            if self.live is not None:
+                # 检查 Live 实例是否已停止（通过检查 _is_started 属性）
+                # Rich Live 对象在停止后，_is_started 会被设置为 False
+                if hasattr(self.live, '_is_started'):
+                    if not self.live._is_started:
+                        live_needs_restart = True
+                else:
+                    # 如果没有 _is_started 属性，尝试通过其他方式检查
+                    # 检查是否有 _thread 属性（Live 使用线程来刷新）
+                    if hasattr(self.live, '_thread') and self.live._thread is None:
+                        live_needs_restart = True
+            
+            if self.live is None or live_needs_restart:
+                # 如果 Live 实例已停止，先清理
+                if self.live is not None:
+                    try:
+                        self.live.stop()
+                    except Exception:
+                        pass
+                    self.live = None
+                
                 panel = self._get_display_panel_for_message(msg_id)
-                self.live = Live(panel, console=self.console, refresh_per_second=10, transient=False)
+                # 在 WSL 环境中，需要更高的刷新频率和强制刷新
+                # 使用较大的 refresh_per_second 值以确保实时更新
+                self.live = Live(
+                    panel, 
+                    console=self.console, 
+                    refresh_per_second=50,  # 提高刷新频率到 50Hz，确保实时性
+                    transient=False,
+                    auto_refresh=True,  # 启用自动刷新
+                )
                 self.live.start()
             
             # 更新 Live 显示内容（刷新当前消息）
             panel = self._get_display_panel_for_message(msg_id)
-            self.live.update(panel)
+            try:
+                self.live.update(panel)
+            except (RuntimeError, AttributeError) as e:
+                # 如果更新失败，重新创建 Live 实例
+                if self.live is not None:
+                    try:
+                        self.live.stop()
+                    except Exception:
+                        pass
+                self.live = None
+                # 重新创建并启动
+                self.live = Live(
+                    panel, 
+                    console=self.console, 
+                    refresh_per_second=50,
+                    transient=False,
+                    auto_refresh=True,
+                )
+                self.live.start()
+            
+            # 强制立即刷新（在 WSL 环境中非常重要）
+            # Rich Live 的 refresh() 方法会立即触发一次渲染
+            try:
+                self.live.refresh()
+            except Exception:
+                # 如果 refresh() 失败，继续执行
+                pass
+            
+            # 在 WSL 环境中，强制刷新 stdout 和 stderr 缓冲区
+            # 这是解决缓冲区问题的关键
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except (AttributeError, OSError):
+                # 如果刷新失败，忽略错误
+                pass
             
             # 更新当前流式输出的消息id
             self.current_streaming_msg_id = msg_id
@@ -672,6 +741,11 @@ class StreamingOutputHandler:
         # 显示自定义更新（换行显示，不刷新）
         display_text = f"[yellow][{self._format_timestamp()}][/yellow] [bold yellow]Custom[/bold yellow]: {custom_text}"
         self.console.print(display_text)
+        # 强制刷新输出（在 WSL 环境中很重要）
+        try:
+            sys.stdout.flush()
+        except (AttributeError, OSError):
+            pass
     
     def handle_updates_stream(self, chunk: Dict[str, Any]) -> None:
         """
@@ -802,7 +876,6 @@ async def stream_agent_execution(
         handler.console.print()
     
     final_result = None
-    last_update_state = None
     
     try:
         # 使用 astream 进行异步流式执行
@@ -850,7 +923,7 @@ async def stream_agent_execution(
                         interrupt_result = await handle_interrupt(
                             interrupt_data,
                             handler.console,
-                            handler.live
+                            handler
                         )
                         
                         interrupt_type, interrupt_value = interrupt_result
@@ -891,7 +964,7 @@ async def stream_agent_execution(
                                 interrupt_result = await handle_interrupt(
                                     interrupt_data,
                                     handler.console,
-                                    handler.live
+                                    handler
                                 )
                                 interrupt_type, interrupt_value = interrupt_result
                                 
@@ -937,7 +1010,7 @@ async def stream_agent_execution(
                         interrupt_result = await handle_interrupt(
                             interrupt_data,
                             handler.console,
-                            handler.live
+                            handler
                         )
                         
                         interrupt_type, interrupt_value = interrupt_result
