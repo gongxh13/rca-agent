@@ -13,6 +13,7 @@ import asyncio
 import uuid
 import json
 import time
+import codecs
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 from rich.console import Console
@@ -46,6 +47,56 @@ def build_prompt_message(header: str) -> HTML:
         "<ansigreen><b>Enter</b></ansigreen>"
         "<ansiblue> 提交。</ansiblue>\n\n"
     )
+
+
+def fix_utf8_encoding(text: str) -> str:
+    """
+    修复 UTF-8 编码错误，特别是处理不完整的中文字符序列
+    
+    当用户在命令行删除部分汉字时，可能会产生代理对（surrogates）或无效的 UTF-8 序列。
+    这个函数会尝试修复这些问题。
+    
+    Args:
+        text: 可能包含编码错误的文本
+        
+    Returns:
+        修复后的文本
+    """
+    if not text:
+        return text
+    
+    # 如果输入不是字符串，先转换为字符串
+    if not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:
+            return ""
+    
+    try:
+        # 方法1：尝试使用 surrogatepass 处理代理对
+        # 先将字符串编码为 UTF-8（允许代理对），然后解码（替换无效字符）
+        text_bytes = text.encode('utf-8', errors='surrogatepass')
+        fixed_text = text_bytes.decode('utf-8', errors='replace')
+        return fixed_text
+    except (UnicodeEncodeError, UnicodeDecodeError, UnicodeError):
+        try:
+            # 方法2：直接使用 replace 错误处理策略
+            # 这会替换所有无效字符为替换字符（通常是小方块）
+            text_bytes = text.encode('utf-8', errors='replace')
+            fixed_text = text_bytes.decode('utf-8', errors='replace')
+            return fixed_text
+        except Exception:
+            try:
+                # 方法3：使用 ignore 策略，完全忽略无效字符
+                # 这可能会丢失一些字符，但至少不会崩溃
+                fixed_text = text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                return fixed_text
+            except Exception:
+                # 最后的备选方案：返回空字符串或原始文本的 ASCII 表示
+                try:
+                    return text.encode('ascii', errors='ignore').decode('ascii')
+                except Exception:
+                    return ""
 
 
 async def handle_interrupt(
@@ -138,9 +189,16 @@ async def handle_interrupt(
             validator=NonEmptyValidator(),
             validate_while_typing=False,
         )
-        user_input = await session.prompt_async(
-            build_prompt_message("请输入响应")
-        )
+        try:
+            user_input = await session.prompt_async(
+                build_prompt_message("请输入响应")
+            )
+            # 修复可能的 UTF-8 编码错误
+            user_input = fix_utf8_encoding(user_input)
+        except UnicodeError as e:
+            console.print(f"[bold red]编码错误: {e}[/bold red]")
+            console.print("[bold yellow]尝试修复编码问题...[/bold yellow]")
+            user_input = ""
         
         console.print()
         console.print(Rule(style="dim"))
@@ -200,9 +258,16 @@ async def handle_interrupt(
         
         # 获取用户决策
         console.print("[bold yellow]💡 请选择您的决策[/bold yellow]")
-        user_input = await session.prompt_async(
-            build_prompt_message("请输入决策 (approve/edit/reject)")
-        )
+        try:
+            user_input = await session.prompt_async(
+                build_prompt_message("请输入决策 (approve/edit/reject)")
+            )
+            # 修复可能的 UTF-8 编码错误
+            user_input = fix_utf8_encoding(user_input)
+        except UnicodeError as e:
+            console.print(f"[bold red]编码错误: {e}[/bold red]")
+            console.print("[bold yellow]尝试修复编码问题...[/bold yellow]")
+            user_input = ""
         
         user_input = user_input.strip().lower()
         
@@ -222,15 +287,31 @@ async def handle_interrupt(
             if "edit" in allowed_decisions:
                 # 获取编辑后的操作
                 console.print("[bold yellow]请输入编辑后的工具名称 (留空表示不变):[/bold yellow]")
-                new_tool_name = await session.prompt_async(
-                    build_prompt_message("工具名称")
-                )
+                try:
+                    new_tool_name = await session.prompt_async(
+                        build_prompt_message("工具名称")
+                    )
+                    # 修复可能的 UTF-8 编码错误
+                    new_tool_name = fix_utf8_encoding(new_tool_name)
+                except UnicodeError as e:
+                    console.print(f"[bold red]编码错误: {e}[/bold red]")
+                    console.print("[bold yellow]使用原始工具名称...[/bold yellow]")
+                    new_tool_name = action_name
+                
                 new_tool_name = new_tool_name.strip() or action_name
                 
                 console.print("[bold yellow]请输入编辑后的参数 (JSON格式，留空表示不变):[/bold yellow]")
-                new_args_input = await session.prompt_async(
-                    build_prompt_message("参数 (JSON)")
-                )
+                try:
+                    new_args_input = await session.prompt_async(
+                        build_prompt_message("参数 (JSON)")
+                    )
+                    # 修复可能的 UTF-8 编码错误
+                    new_args_input = fix_utf8_encoding(new_args_input)
+                except UnicodeError as e:
+                    console.print(f"[bold red]编码错误: {e}[/bold red]")
+                    console.print("[bold yellow]使用原始参数...[/bold yellow]")
+                    new_args_input = ""
+                
                 new_args_input = new_args_input.strip()
                 
                 if new_args_input:
@@ -257,9 +338,17 @@ async def handle_interrupt(
         elif user_input in ["reject", "r", "n", "no", "拒绝", "驳回"]:
             if "reject" in allowed_decisions:
                 console.print("[bold yellow]请输入拒绝原因:[/bold yellow]")
-                reject_message = await session.prompt_async(
-                    build_prompt_message("拒绝原因")
-                )
+                try:
+                    reject_message = await session.prompt_async(
+                        build_prompt_message("拒绝原因")
+                    )
+                    # 修复可能的 UTF-8 编码错误
+                    reject_message = fix_utf8_encoding(reject_message)
+                except UnicodeError as e:
+                    console.print(f"[bold red]编码错误: {e}[/bold red]")
+                    console.print("[bold yellow]使用默认拒绝原因...[/bold yellow]")
+                    reject_message = "用户拒绝"
+                
                 decision = {
                     "type": "reject",
                     "message": reject_message.strip()
@@ -275,7 +364,12 @@ async def handle_interrupt(
                 if user_input not in ["approve", "a", "y", "yes", "同意", "批准", 
                                        "edit", "e", "修改", "编辑",
                                        "reject", "r", "n", "no", "拒绝", "驳回"]:
-                    console.print(f"[bold yellow]警告: 无法识别输入 '{user_input}'，使用默认决策: {default_decision_type}[/bold yellow]")
+                    # 安全地打印用户输入，避免编码错误
+                    safe_user_input = fix_utf8_encoding(user_input) if user_input else ""
+                    try:
+                        console.print(f"[bold yellow]警告: 无法识别输入 '{safe_user_input}'，使用默认决策: {default_decision_type}[/bold yellow]")
+                    except UnicodeError:
+                        console.print(f"[bold yellow]警告: 无法识别输入，使用默认决策: {default_decision_type}[/bold yellow]")
                 
                 if default_decision_type == "approve":
                     decision = {"type": "approve"}
