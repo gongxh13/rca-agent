@@ -11,7 +11,9 @@
 
 import asyncio
 import uuid
-from typing import Any, Dict, List, Optional
+import json
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 from rich.console import Console
 from rich.panel import Panel
@@ -19,7 +21,285 @@ from rich.rule import Rule
 from rich.text import Text
 from rich.live import Live
 from rich.console import Group
+from rich.markdown import Markdown
 from datetime import datetime
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.validation import Validator, ValidationError
+from langgraph.types import Command, Interrupt
+
+
+class NonEmptyValidator(Validator):
+    """验证输入不能为空"""
+    def validate(self, document):
+        if not document.text.strip():
+            raise ValidationError(message="输入不能为空，请重新输入")
+
+
+def build_prompt_message(header: str) -> HTML:
+    """构建提示消息"""
+    return HTML(
+        f"\n\n➡️ <b><ansiyellow>{header}</ansiyellow></b> > \n\n"
+        "<ansiblue>👉 编辑完成后，请按 </ansiblue>"
+        "<ansigreen><b>Esc</b></ansigreen>"
+        "<ansiblue> 然后 </ansiblue>"
+        "<ansigreen><b>Enter</b></ansigreen>"
+        "<ansiblue> 提交。</ansiblue>\n\n"
+    )
+
+
+async def handle_interrupt(
+    interrupt_data: Any,
+    console: Console,
+    live: Optional[Live]
+) -> Tuple[str, Any]:
+    """
+    处理中断事件，获取用户决策或输入
+    
+    Args:
+        interrupt_data: 中断数据，可能是 Interrupt 对象的 tuple 或单个 Interrupt，或自定义格式
+        console: Rich Console 实例
+        live: Live 实例（如果有的话，需要先停止）
+        
+    Returns:
+        tuple[str, Any]: 
+        - 如果是内置 HITL 格式，返回 ("decisions", decisions_list)
+        - 如果是自定义格式，返回 ("text", user_input_string)
+    """
+    # 停止 Live 显示（如果有）
+    if live is not None:
+        live.stop()
+    
+    # 提取实际的 HITL 请求数据
+    hitl_request = None
+    raw_interrupt_value = None
+    
+    # 处理 tuple 格式的中断数据
+    if isinstance(interrupt_data, tuple):
+        for each in interrupt_data:
+            if isinstance(each, Interrupt):
+                raw_interrupt_value = each.value
+                hitl_request = each.value if isinstance(each.value, dict) else None
+                break
+    # 处理单个 Interrupt 对象
+    elif isinstance(interrupt_data, Interrupt):
+        raw_interrupt_value = interrupt_data.value
+        hitl_request = interrupt_data.value if isinstance(interrupt_data.value, dict) else None
+    # 处理字典格式
+    elif isinstance(interrupt_data, dict):
+        raw_interrupt_value = interrupt_data
+        # 如果字典中已经有 action_requests，说明已经是 HITL 请求格式
+        if "action_requests" in interrupt_data:
+            hitl_request = interrupt_data
+        else:
+            # 可能是包装在其他键中，尝试查找
+            for key, value in interrupt_data.items():
+                if isinstance(value, dict) and "action_requests" in value:
+                    hitl_request = value
+                    break
+    
+    # 检查是否是内置 HITL 格式（有 action_requests 和 review_configs）
+    is_builtin_hitl = (
+        hitl_request is not None 
+        and isinstance(hitl_request, dict) 
+        and "action_requests" in hitl_request
+    )
+    
+    # 如果不是内置格式，按自定义格式处理
+    if not is_builtin_hitl:
+        console.print()
+        console.print(Rule("[bold yellow]检测到自定义中断事件[/bold yellow]", style="yellow"))
+        console.print()
+        
+        # 显示中断数据
+        if raw_interrupt_value is not None:
+            if isinstance(raw_interrupt_value, dict):
+                # 如果是字典，使用 JSON 格式显示
+                console.print("[bold cyan]中断数据:[/bold cyan]")
+                console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
+            elif isinstance(raw_interrupt_value, str):
+                # 如果是字符串，直接显示
+                console.print("[bold cyan]中断数据:[/bold cyan]")
+                console.print(raw_interrupt_value)
+            else:
+                # 其他类型，转换为字符串显示
+                console.print("[bold cyan]中断数据:[/bold cyan]")
+                console.print(str(raw_interrupt_value))
+        else:
+            console.print("[bold cyan]中断数据:[/bold cyan]")
+            console.print(str(interrupt_data))
+        
+        console.print()
+        console.print("[bold yellow]💡 请输入您的响应（将在 resume 中作为输入）[/bold yellow]")
+        
+        # 获取用户输入
+        session = PromptSession(
+            multiline=True,
+            validator=NonEmptyValidator(),
+            validate_while_typing=False,
+        )
+        user_input = await session.prompt_async(
+            build_prompt_message("请输入响应")
+        )
+        
+        console.print()
+        console.print(Rule(style="dim"))
+        console.print()
+        
+        return ("text", user_input.strip())
+    
+    # 以下是内置 HITL 格式的处理
+    
+    action_requests = hitl_request.get("action_requests", [])
+    review_configs = hitl_request.get("review_configs", [])
+    
+    if not action_requests:
+        console.print("[bold yellow]警告: 中断请求中没有需要审核的操作[/bold yellow]")
+        return ("decisions", [])
+    
+    console.print()
+    console.print(Rule("[bold yellow]需要人工审核的操作[/bold yellow]", style="yellow"))
+    console.print()
+    
+    # 显示每个需要审核的操作
+    decisions = []
+    session = PromptSession(
+        multiline=True,
+        validator=NonEmptyValidator(),
+        validate_while_typing=False,
+    )
+    
+    for idx, action_request in enumerate(action_requests):
+        action_name = action_request.get("name", "unknown")
+        arguments = action_request.get("arguments", {})
+        description = action_request.get("description", "")
+        
+        # 获取该操作允许的决策类型
+        allowed_decisions = ["approve", "edit", "reject"]  # 默认允许所有
+        for review_config in review_configs:
+            if review_config.get("action_name") == action_name:
+                allowed_decisions = review_config.get("allowed_decisions", allowed_decisions)
+                break
+        
+        # 显示操作信息
+        console.print(f"\n[bold cyan]操作 {idx + 1}/{len(action_requests)}: {action_name}[/bold cyan]")
+        console.print(f"[dim]参数:[/dim] {json.dumps(arguments, indent=2, ensure_ascii=False)}")
+        if description:
+            console.print(Markdown(description), style="cyan")
+        
+        # 显示可用的决策选项
+        options_text = "可用选项: "
+        if "approve" in allowed_decisions:
+            options_text += "[green]✅ approve[/green]"
+        if "edit" in allowed_decisions:
+            options_text += " [yellow]✏️ edit[/yellow]"
+        if "reject" in allowed_decisions:
+            options_text += " [red]❌ reject[/red]"
+        console.print(options_text)
+        console.print()
+        
+        # 获取用户决策
+        console.print("[bold yellow]💡 请选择您的决策[/bold yellow]")
+        user_input = await session.prompt_async(
+            build_prompt_message("请输入决策 (approve/edit/reject)")
+        )
+        
+        user_input = user_input.strip().lower()
+        
+        # 解析用户输入
+        decision = None
+        
+        # 检查用户输入是否匹配 approve
+        if user_input in ["approve", "a", "y", "yes", "同意", "批准"]:
+            if "approve" in allowed_decisions:
+                decision = {"type": "approve"}
+            else:
+                console.print(f"[bold red]错误: 此操作不允许 approve 决策，可用选项: {', '.join(allowed_decisions)}[/bold red]")
+                # 继续处理，使用默认决策
+        
+        # 检查用户输入是否匹配 edit
+        elif user_input in ["edit", "e", "修改", "编辑"]:
+            if "edit" in allowed_decisions:
+                # 获取编辑后的操作
+                console.print("[bold yellow]请输入编辑后的工具名称 (留空表示不变):[/bold yellow]")
+                new_tool_name = await session.prompt_async(
+                    build_prompt_message("工具名称")
+                )
+                new_tool_name = new_tool_name.strip() or action_name
+                
+                console.print("[bold yellow]请输入编辑后的参数 (JSON格式，留空表示不变):[/bold yellow]")
+                new_args_input = await session.prompt_async(
+                    build_prompt_message("参数 (JSON)")
+                )
+                new_args_input = new_args_input.strip()
+                
+                if new_args_input:
+                    try:
+                        new_args = json.loads(new_args_input)
+                    except json.JSONDecodeError:
+                        console.print("[bold red]错误: JSON格式无效，使用原始参数[/bold red]")
+                        new_args = arguments
+                else:
+                    new_args = arguments
+                
+                decision = {
+                    "type": "edit",
+                    "edited_action": {
+                        "name": new_tool_name,
+                        "args": new_args
+                    }
+                }
+            else:
+                console.print(f"[bold red]错误: 此操作不允许 edit 决策，可用选项: {', '.join(allowed_decisions)}[/bold red]")
+                # 继续处理，使用默认决策
+        
+        # 检查用户输入是否匹配 reject
+        elif user_input in ["reject", "r", "n", "no", "拒绝", "驳回"]:
+            if "reject" in allowed_decisions:
+                console.print("[bold yellow]请输入拒绝原因:[/bold yellow]")
+                reject_message = await session.prompt_async(
+                    build_prompt_message("拒绝原因")
+                )
+                decision = {
+                    "type": "reject",
+                    "message": reject_message.strip()
+                }
+            else:
+                console.print(f"[bold red]错误: 此操作不允许 reject 决策，可用选项: {', '.join(allowed_decisions)}[/bold red]")
+                # 继续处理，使用默认决策
+        
+        # 如果用户输入无效或不被允许，使用默认决策
+        if decision is None:
+            if allowed_decisions:
+                default_decision_type = allowed_decisions[0]
+                if user_input not in ["approve", "a", "y", "yes", "同意", "批准", 
+                                       "edit", "e", "修改", "编辑",
+                                       "reject", "r", "n", "no", "拒绝", "驳回"]:
+                    console.print(f"[bold yellow]警告: 无法识别输入 '{user_input}'，使用默认决策: {default_decision_type}[/bold yellow]")
+                
+                if default_decision_type == "approve":
+                    decision = {"type": "approve"}
+                elif default_decision_type == "edit":
+                    # 对于 edit，使用原始参数（不修改）
+                    decision = {
+                        "type": "edit",
+                        "edited_action": {
+                            "name": action_name,
+                            "args": arguments
+                        }
+                    }
+                elif default_decision_type == "reject":
+                    decision = {"type": "reject", "message": "默认拒绝"}
+        
+        if decision:
+            decisions.append(decision)
+        
+        console.print()
+    
+    console.print(Rule(style="dim"))
+    console.print()
+    
+    return ("decisions", decisions)
 
 
 class StreamingOutputHandler:
@@ -62,9 +342,48 @@ class StreamingOutputHandler:
         # 使用 Live 组件来管理实时更新（全局单一实例）
         self.live: Optional[Live] = None
         
+        # 记录开始时间，用于计算执行时间
+        self.start_time: Optional[float] = None
+        
     def _format_timestamp(self) -> str:
         """格式化时间戳"""
         return datetime.now().strftime("%H:%M:%S")
+    
+    def _format_elapsed_time(self, elapsed_seconds: float) -> str:
+        """
+        格式化已执行时间为易读的格式
+        
+        Args:
+            elapsed_seconds: 已执行的秒数
+            
+        Returns:
+            格式化后的时间字符串，如 "1m 23s" 或 "45s"
+        """
+        if elapsed_seconds < 60:
+            return f"{int(elapsed_seconds)}s"
+        elif elapsed_seconds < 3600:
+            minutes = int(elapsed_seconds // 60)
+            seconds = int(elapsed_seconds % 60)
+            return f"{minutes}m {seconds}s"
+        else:
+            hours = int(elapsed_seconds // 3600)
+            minutes = int((elapsed_seconds % 3600) // 60)
+            seconds = int(elapsed_seconds % 60)
+            return f"{hours}h {minutes}m {seconds}s"
+    
+    def _get_elapsed_time_str(self) -> str:
+        """
+        获取当前已执行时间的字符串表示
+        
+        Returns:
+            已执行时间的字符串，如果未开始则返回空字符串
+        """
+        if self.start_time is None:
+            self.start_time = time.time()
+            return "0s"
+        
+        elapsed = time.time() - self.start_time
+        return self._format_elapsed_time(elapsed)
     
     def _get_message_id(self, message_chunk: Any, metadata: Dict[str, Any]) -> str:
         """
@@ -103,16 +422,20 @@ class StreamingOutputHandler:
             Panel 对象
         """
         if msg_id not in self.accumulated_texts:
-            return Panel("", title="Message", border_style="blue", expand=True)
+            elapsed_time = self._get_elapsed_time_str()
+            return Panel("", title=f"Message (已执行: {elapsed_time})", border_style="blue", expand=True)
         
         content = self.accumulated_texts[msg_id]
         metadata = self.message_metadata.get(msg_id, {})
         node_name = metadata.get("node_name", "unknown")
         
+        # 获取已执行时间
+        elapsed_time = self._get_elapsed_time_str()
+        
         # 只显示消息内容，不显示时间戳和节点名称
         display_text = Text(content, style="")
         
-        return Panel(display_text, title=f"Message ({node_name})", border_style="blue", expand=True)
+        return Panel(display_text, title=f"Message ({node_name}) | 已执行: {elapsed_time}", border_style="blue", expand=True)
     
     def handle_messages_stream(
         self,
@@ -316,17 +639,19 @@ async def stream_agent_execution(
     input_data: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
     stream_modes: List[str] = ["messages", "custom", "updates"],
-    handler: Optional[StreamingOutputHandler] = None
+    handler: Optional[StreamingOutputHandler] = None,
+    _is_resume: bool = False  # 内部参数，表示是否是恢复执行
 ) -> Dict[str, Any]:
     """
-    异步流式执行 agent
+    异步流式执行 agent，支持人机交互（Human-in-the-Loop）
     
     Args:
         agent: LangChain agent 实例
-        input_data: 输入数据
-        config: 配置信息（包含 callbacks 等）
+        input_data: 输入数据，如果是 Command 对象则表示恢复执行
+        config: 配置信息（必须包含 thread_id 以支持中断恢复）
         stream_modes: 流式模式列表，支持 ["messages", "custom", "updates"]
         handler: 流式输出处理器，如果为 None 则创建新的
+        _is_resume: 内部参数，表示是否是恢复执行（递归调用时使用）
         
     Returns:
         最终的执行结果
@@ -341,10 +666,17 @@ async def stream_agent_execution(
     # 准备配置
     agent_config = config or {}
     
-    # 显示开始信息
-    handler.console.print()
-    handler.console.print(Rule("[bold cyan]Agent Execution Started[/bold cyan]", style="cyan"))
-    handler.console.print()
+    # 确保 config 中有 thread_id（用于中断恢复）
+    if "configurable" not in agent_config:
+        agent_config["configurable"] = {}
+    if "thread_id" not in agent_config["configurable"]:
+        agent_config["configurable"]["thread_id"] = str(uuid.uuid4())
+    
+    # 显示开始信息（仅在首次调用时，不是恢复执行时）
+    if not _is_resume:
+        handler.console.print()
+        handler.console.print(Rule("[bold cyan]Agent Execution Started[/bold cyan]", style="cyan"))
+        handler.console.print()
     
     final_result = None
     last_update_state = None
@@ -387,10 +719,84 @@ async def stream_agent_execution(
                     handler.handle_custom_stream(chunk_data)
                 
                 elif mode == "updates":
-                    # updates 模式：暂时不处理
-                    # 注意：不要在这里 finalize，因为 updates 可能不是消息完成的标志
-                    # 只在流式输出真正结束时才 finalize
-                    pass
+                    # updates 模式：检查是否有中断
+                    # 根据用户提供的代码片段，__interrupt__ 可能在 chunk_data 中
+                    if isinstance(chunk_data, dict) and "__interrupt__" in chunk_data:
+                        interrupt_data = chunk_data["__interrupt__"]
+                        # 处理中断，获取用户决策或输入
+                        interrupt_result = await handle_interrupt(
+                            interrupt_data,
+                            handler.console,
+                            handler.live
+                        )
+                        
+                        interrupt_type, interrupt_value = interrupt_result
+                        
+                        if interrupt_type == "decisions":
+                            # 内置 HITL 格式，使用 decisions
+                            decisions = interrupt_value
+                            if decisions:
+                                resume_command = Command(resume={"decisions": decisions})
+                                return await stream_agent_execution(
+                                    agent,
+                                    resume_command,
+                                    config=agent_config,
+                                    stream_modes=stream_modes,
+                                    handler=handler,
+                                    _is_resume=True
+                                )
+                        elif interrupt_type == "text":
+                            # 自定义格式，使用文本输入
+                            user_input = interrupt_value
+                            if user_input:
+                                resume_command = Command(resume=user_input)
+                                return await stream_agent_execution(
+                                    agent,
+                                    resume_command,
+                                    config=agent_config,
+                                    stream_modes=stream_modes,
+                                    handler=handler,
+                                    _is_resume=True
+                                )
+                    # 也检查 chunk_data 本身是否包含中断信息（某些情况下可能直接在 updates 中）
+                    elif isinstance(chunk_data, dict):
+                        # 检查是否有 Interrupt 相关的数据
+                        for key, value in chunk_data.items():
+                            if key == "__interrupt__" or (isinstance(value, (tuple, list)) and 
+                                any(isinstance(item, Interrupt) for item in value if isinstance(item, Interrupt))):
+                                interrupt_data = value if key == "__interrupt__" else chunk_data
+                                interrupt_result = await handle_interrupt(
+                                    interrupt_data,
+                                    handler.console,
+                                    handler.live
+                                )
+                                interrupt_type, interrupt_value = interrupt_result
+                                
+                                if interrupt_type == "decisions":
+                                    decisions = interrupt_value
+                                    if decisions:
+                                        resume_command = Command(resume={"decisions": decisions})
+                                        return await stream_agent_execution(
+                                            agent,
+                                            resume_command,
+                                            config=agent_config,
+                                            stream_modes=stream_modes,
+                                            handler=handler,
+                                            _is_resume=True
+                                        )
+                                elif interrupt_type == "text":
+                                    user_input = interrupt_value
+                                    if user_input:
+                                        resume_command = Command(resume=user_input)
+                                        return await stream_agent_execution(
+                                            agent,
+                                            resume_command,
+                                            config=agent_config,
+                                            stream_modes=stream_modes,
+                                            handler=handler,
+                                            _is_resume=True
+                                        )
+                                break
             
             else:
                 # 单模式输出或直接是更新块
@@ -401,9 +807,44 @@ async def stream_agent_execution(
                 elif "custom" in stream_modes:
                     handler.handle_custom_stream(chunk)
                 elif "updates" in stream_modes and isinstance(chunk, dict):
-                    # updates 模式：暂时不处理
-                    # 注意：不要在这里 finalize，因为 updates 可能不是消息完成的标志
-                    pass
+                    # updates 模式：检查是否有中断
+                    if "__interrupt__" in chunk:
+                        interrupt_data = chunk["__interrupt__"]
+                        # 处理中断，获取用户决策或输入
+                        interrupt_result = await handle_interrupt(
+                            interrupt_data,
+                            handler.console,
+                            handler.live
+                        )
+                        
+                        interrupt_type, interrupt_value = interrupt_result
+                        
+                        if interrupt_type == "decisions":
+                            # 内置 HITL 格式，使用 decisions
+                            decisions = interrupt_value
+                            if decisions:
+                                resume_command = Command(resume={"decisions": decisions})
+                                return await stream_agent_execution(
+                                    agent,
+                                    resume_command,
+                                    config=agent_config,
+                                    stream_modes=stream_modes,
+                                    handler=handler,
+                                    _is_resume=True
+                                )
+                        elif interrupt_type == "text":
+                            # 自定义格式，使用文本输入
+                            user_input = interrupt_value
+                            if user_input:
+                                resume_command = Command(resume=user_input)
+                                return await stream_agent_execution(
+                                    agent,
+                                    resume_command,
+                                    config=agent_config,
+                                    stream_modes=stream_modes,
+                                    handler=handler,
+                                    _is_resume=True
+                                )
     
     except Exception as e:
         handler.console.print(f"[bold red]Error during streaming: {e}[/bold red]")
@@ -412,15 +853,17 @@ async def stream_agent_execution(
         raise
     
     finally:
-        # 完成所有流式输出
-        handler.finalize_all()
+        # 只有在正常结束（不是通过递归恢复执行）时才 finalize 和 cleanup
+        if not _is_resume:
+            # 完成所有流式输出
+            handler.finalize_all()
+            # 清理资源
+            handler.cleanup()
     
     # 从流式输出中获取最后一条消息的内容作为最终结果
     last_message_content = handler.get_last_message_content()
     if last_message_content:
         final_result = {"output": last_message_content, "messages": []}
-    # 清理资源
-    handler.cleanup()
     
     return final_result
 
