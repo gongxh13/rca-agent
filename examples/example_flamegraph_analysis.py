@@ -691,7 +691,7 @@ async def run_analysis(
         # 异步流式执行
         result = await stream_agent_execution(
             agent=agent,
-            input_data=dict(
+            input=dict(
                 messages=[
                     HumanMessage(content=question)
                 ]
