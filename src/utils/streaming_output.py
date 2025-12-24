@@ -165,13 +165,42 @@ async def handle_interrupt(
         # 显示中断数据
         if raw_interrupt_value is not None:
             if isinstance(raw_interrupt_value, dict):
-                # 如果是字典，使用 JSON 格式显示
-                console.print("[bold cyan]中断数据:[/bold cyan]")
-                console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
+                # 检查是否是 {"message": "..."} 格式，如果是 markdown 则美观显示
+                if len(raw_interrupt_value) == 1 and "message" in raw_interrupt_value:
+                    message_content = raw_interrupt_value["message"]
+                    if isinstance(message_content, str) and message_content.strip():
+                        # 检查是否包含 markdown 标记（如 #, **, *, `, ``` 等）
+                        has_markdown = any(
+                            marker in message_content
+                            for marker in ["# ", "**", "* ", "`", "```", "> ", "- ", "1. ", "[", "]("]
+                        )
+                        if has_markdown:
+                            # 使用 Markdown 渲染
+                            console.print("[bold cyan]中断消息:[/bold cyan]")
+                            console.print()
+                            console.print(Markdown(message_content), style="cyan")
+                        else:
+                            # 普通文本，使用 Panel 包装
+                            console.print("[bold cyan]中断消息:[/bold cyan]")
+                            console.print()
+                            console.print(Panel(message_content, border_style="cyan", expand=False))
+                    else:
+                        # 空的或非字符串 message，显示 JSON
+                        console.print("[bold cyan]中断数据:[/bold cyan]")
+                        console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
+                else:
+                    # 其他字典格式，使用 JSON 格式显示
+                    console.print("[bold cyan]中断数据:[/bold cyan]")
+                    console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
             elif isinstance(raw_interrupt_value, str):
-                # 如果是字符串，直接显示
-                console.print("[bold cyan]中断数据:[/bold cyan]")
-                console.print(raw_interrupt_value)
+                # 如果是字符串，检查是否是 markdown
+                if any(marker in raw_interrupt_value for marker in ["# ", "**", "* ", "`", "```", "> ", "- ", "1. ", "[", "]("]):
+                    console.print("[bold cyan]中断消息:[/bold cyan]")
+                    console.print()
+                    console.print(Markdown(raw_interrupt_value), style="cyan")
+                else:
+                    console.print("[bold cyan]中断数据:[/bold cyan]")
+                    console.print(Panel(raw_interrupt_value, border_style="cyan", expand=False))
             else:
                 # 其他类型，转换为字符串显示
                 console.print("[bold cyan]中断数据:[/bold cyan]")
@@ -730,7 +759,7 @@ class StreamingOutputHandler:
 
 async def stream_agent_execution(
     agent: Any,
-    input_data: Dict[str, Any],
+    input: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
     stream_modes: List[str] = ["messages", "custom", "updates"],
     handler: Optional[StreamingOutputHandler] = None,
@@ -741,7 +770,7 @@ async def stream_agent_execution(
     
     Args:
         agent: LangChain agent 实例
-        input_data: 输入数据，如果是 Command 对象则表示恢复执行
+        input: 输入数据，如果是 Command 对象则表示恢复执行
         config: 配置信息（必须包含 thread_id 以支持中断恢复）
         stream_modes: 流式模式列表，支持 ["messages", "custom", "updates"]
         handler: 流式输出处理器，如果为 None 则创建新的
@@ -767,7 +796,7 @@ async def stream_agent_execution(
         agent_config["configurable"]["thread_id"] = str(uuid.uuid4())
     
     # 显示开始信息（仅在首次调用时，不是恢复执行时）
-    if not _is_resume:
+    if not _is_resume and not isinstance(input, Command):
         handler.console.print()
         handler.console.print(Rule("[bold cyan]Agent Execution Started[/bold cyan]", style="cyan"))
         handler.console.print()
@@ -782,7 +811,7 @@ async def stream_agent_execution(
         # 2. 二元组：(mode, data) - 某些情况下的多模式输出
         # 3. 直接数据 - 单模式输出
         async for chunk in agent.astream(
-            input_data,
+            input,
             config=agent_config,
             stream_mode=stream_modes,
             subgraphs=True,
