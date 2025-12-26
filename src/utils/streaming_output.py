@@ -163,7 +163,7 @@ async def handle_interrupt(
     # 如果不是内置格式，按自定义格式处理
     if not is_builtin_hitl:
         console.print()
-        console.print(Rule("[bold yellow]检测到自定义中断事件[/bold yellow]", style="yellow"))
+        console.print(Rule("[bold yellow]用户交互[/bold yellow]", style="yellow"))
         console.print()
         
         # 显示中断数据
@@ -180,41 +180,30 @@ async def handle_interrupt(
                         )
                         if has_markdown:
                             # 使用 Markdown 渲染
-                            console.print("[bold cyan]中断消息:[/bold cyan]")
-                            console.print()
                             console.print(Markdown(message_content), style="cyan")
                         else:
                             # 普通文本，使用 Panel 包装
-                            console.print("[bold cyan]中断消息:[/bold cyan]")
-                            console.print()
                             console.print(Panel(message_content, border_style="cyan", expand=False))
                     else:
                         # 空的或非字符串 message，显示 JSON
-                        console.print("[bold cyan]中断数据:[/bold cyan]")
                         console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
                 else:
                     # 其他字典格式，使用 JSON 格式显示
-                    console.print("[bold cyan]中断数据:[/bold cyan]")
                     console.print(json.dumps(raw_interrupt_value, indent=2, ensure_ascii=False))
             elif isinstance(raw_interrupt_value, str):
                 # 如果是字符串，检查是否是 markdown
                 if any(marker in raw_interrupt_value for marker in ["# ", "**", "* ", "`", "```", "> ", "- ", "1. ", "[", "]("]):
-                    console.print("[bold cyan]中断消息:[/bold cyan]")
-                    console.print()
                     console.print(Markdown(raw_interrupt_value), style="cyan")
                 else:
-                    console.print("[bold cyan]中断数据:[/bold cyan]")
                     console.print(Panel(raw_interrupt_value, border_style="cyan", expand=False))
             else:
                 # 其他类型，转换为字符串显示
-                console.print("[bold cyan]中断数据:[/bold cyan]")
                 console.print(str(raw_interrupt_value))
         else:
-            console.print("[bold cyan]中断数据:[/bold cyan]")
             console.print(str(interrupt_data))
         
         console.print()
-        console.print("[bold yellow]💡 请输入您的响应（将在 resume 中作为输入）[/bold yellow]")
+        console.print("[bold yellow]💡 请输入您的回复[/bold yellow]")
         
         # 获取用户输入
         session = PromptSession(
@@ -245,7 +234,7 @@ async def handle_interrupt(
     review_configs = hitl_request.get("review_configs", [])
     
     if not action_requests:
-        console.print("[bold yellow]警告: 中断请求中没有需要审核的操作[/bold yellow]")
+        console.print("[bold yellow]警告: 交互请求中没有需要审核的操作[/bold yellow]")
         return ("decisions", [])
     
     console.print()
@@ -1062,4 +1051,3 @@ async def stream_agent_execution(
         final_result = {"output": last_message_content, "messages": []}
     
     return final_result
-
