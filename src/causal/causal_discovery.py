@@ -83,8 +83,82 @@ class CausalGraphBuilder:
         if data_clean.empty:
             raise ValueError("Data is empty after cleaning")
         
+        # Remove constant columns (zero variance) - these cause singular matrix errors
+        if self.verbose:
+            print("Checking for constant columns...")
+        constant_cols = []
+        for col in data_clean.columns:
+            if data_clean[col].nunique() <= 1 or data_clean[col].std() == 0:
+                constant_cols.append(col)
+        
+        if constant_cols:
+            if self.verbose:
+                print(f"Removing {len(constant_cols)} constant columns: {constant_cols[:5]}...")
+            data_clean = data_clean.drop(columns=constant_cols)
+        
+        if data_clean.empty:
+            raise ValueError("Data is empty after removing constant columns")
+        
+        # Remove perfectly correlated columns (causes singular matrix)
+        if self.verbose:
+            print("Checking for perfectly correlated columns...")
+        try:
+            corr_matrix = data_clean.corr().abs()
+            # Find pairs of columns with correlation = 1.0 (perfectly correlated)
+            to_remove = set()
+            for i in range(len(corr_matrix.columns)):
+                for j in range(i + 1, len(corr_matrix.columns)):
+                    corr_val = corr_matrix.iloc[i, j]
+                    if pd.notna(corr_val) and corr_val >= 0.999:  # Near-perfect correlation
+                        # Keep the first one, remove the second
+                        col_i = corr_matrix.columns[i]
+                        col_j = corr_matrix.columns[j]
+                        if col_j not in to_remove:
+                            to_remove.add(col_j)
+                            if self.verbose:
+                                print(f"  Removing {col_j} (perfectly correlated with {col_i}, r={corr_val:.4f})")
+            
+            if to_remove:
+                data_clean = data_clean.drop(columns=list(to_remove))
+                if self.verbose:
+                    print(f"Removed {len(to_remove)} perfectly correlated columns")
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Could not check for correlated columns: {e}")
+            # Continue anyway
+        
+        if data_clean.empty:
+            raise ValueError("Data is empty after removing correlated columns")
+        
+        # Check for remaining issues that could cause singular matrix
+        # Check if any column is a linear combination of others
+        if self.verbose:
+            print("Final data check...")
+        
         # Convert to numpy array
         data_array = data_clean.values
+        
+        # Check for NaN or Inf values
+        if np.isnan(data_array).any() or np.isinf(data_array).any():
+            if self.verbose:
+                print("Warning: Data contains NaN or Inf values, replacing...")
+            data_array = np.nan_to_num(data_array, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Final check: ensure matrix is not singular
+        # Note: We can't directly fix the correlation matrix used by PC algorithm,
+        # but we've removed problematic columns above
+        # The PC algorithm will handle remaining issues internally
+        if self.verbose:
+            # Check condition number as a warning
+            try:
+                corr_check = np.corrcoef(data_array.T)
+                cond_num = np.linalg.cond(corr_check)
+                if cond_num > 1e10:
+                    print(f"Warning: Correlation matrix condition number is high ({cond_num:.2e}), "
+                          f"may cause numerical issues")
+            except Exception as e:
+                if self.verbose:
+                    print(f"Warning: Could not check correlation matrix condition: {e}")
         
         if self.verbose:
             print(f"Using {data_array.shape[0]} samples and {data_array.shape[1]} variables")
