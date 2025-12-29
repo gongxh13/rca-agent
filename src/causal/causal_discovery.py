@@ -436,15 +436,19 @@ class CausalGraphBuilder:
         # Initialize independence test (Partial Correlation for continuous data)
         cond_ind_test = ParCorr()
         
-        # Initialize PCMCI algorithm
+        # Initialize PCMCI algorithm with verbosity for progress output
+        verbosity = 1 if self.verbose else 0
         pcmci = PCMCI(
             dataframe=dataframe,
-            cond_ind_test=cond_ind_test
+            cond_ind_test=cond_ind_test,
+            verbosity=verbosity
         )
         
         # Run PCMCI+ algorithm
         if self.verbose:
             print("Running PCMCI+ algorithm...")
+            print("Note: This may take a while for large datasets (197 variables, 2883 time points)")
+            print("PC stage: discovering causal skeleton...")
         
         # Prepare run_pcmci arguments
         run_args = {
@@ -458,6 +462,9 @@ class CausalGraphBuilder:
             run_args['link_assumptions'] = link_assumptions
         
         results = pcmci.run_pcmci(**run_args)
+        
+        if self.verbose:
+            print("MCI stage: refining causal links...")
         
         # Convert results to NetworkX graph
         causal_graph = self._convert_pcmci_to_networkx(
