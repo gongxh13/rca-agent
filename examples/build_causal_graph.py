@@ -26,11 +26,13 @@ def main():
     output_dir = "output/causal_graph"
     alpha = 0.05
     use_trace_prior = True
-    algorithm = 'granger_pc'  # Options: 'pc', 'pcmci', 'granger', 'varlingam', 'granger_pc'
+    algorithm = 'varlingam'  # Options: 'pc', 'pcmci', 'granger', 'varlingam', 'granger_pc'
     # 'granger' is recommended for fast analysis (good for large datasets)
     # 'varlingam' is recommended for balanced speed and accuracy
     # 'pcmci' is most accurate but slow
     max_lag = 5  # Maximum time lag (used for time series algorithms)
+    varlingam_threshold = 0.01  # For VARLiNGAM: threshold for edge significance
+    # Smaller values produce more edges. Recommended: 0.01 (strict), 0.001 (moderate), 1e-6 (very loose)
     
     print("=" * 60)
     print("Causal Graph Construction")
@@ -85,7 +87,8 @@ def main():
         use_trace_prior=use_trace_prior,
         verbose=True,
         algorithm=algorithm,
-        max_lag=max_lag
+        max_lag=max_lag,
+        varlingam_threshold=varlingam_threshold  # Control edge density for VARLiNGAM
     )
     
     # Build causal graph

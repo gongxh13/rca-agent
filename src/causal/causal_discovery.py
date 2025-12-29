@@ -51,7 +51,8 @@ class CausalGraphBuilder:
         max_lag: int = 5,
         tau_min: int = 1,
         granger_test: str = 'ssr_ftest',  # For Granger: 'ssr_ftest', 'ssr_chi2test', 'lrtest', 'params_ftest'
-        granger_cv: int = 5  # For Granger Lasso: number of cross-validation folds
+        granger_cv: int = 5,  # For Granger Lasso: number of cross-validation folds
+        varlingam_threshold: float = 0.01  # For VARLiNGAM: threshold for edge significance (default: 0.01, smaller = more edges)
     ):
         """
         Initialize the causal graph builder.
@@ -70,6 +71,9 @@ class CausalGraphBuilder:
             tau_min: Minimum time lag for PCMCI+ algorithm (default: 1, excludes instantaneous effects)
             granger_test: Statistical test for Granger Causality (default: 'ssr_ftest')
             granger_cv: Number of CV folds for Granger Lasso (default: 5)
+            varlingam_threshold: Threshold for VARLiNGAM edge significance (default: 0.01).
+                Only edges with coefficient > threshold are included. Smaller values produce more edges.
+                Recommended values: 0.01 (strict), 0.001 (moderate), 1e-6 (very loose, original default)
         """
         self.alpha = alpha
         self.use_trace_prior = use_trace_prior
@@ -79,6 +83,7 @@ class CausalGraphBuilder:
         self.tau_min = tau_min
         self.granger_test = granger_test
         self.granger_cv = granger_cv
+        self.varlingam_threshold = varlingam_threshold
         
         valid_algorithms = ['pc', 'pcmci', 'granger', 'varlingam', 'granger_pc']
         if self.algorithm not in valid_algorithms:
@@ -1114,7 +1119,7 @@ class CausalGraphBuilder:
                 max_coeff = max(coeffs_across_lags) if coeffs_across_lags else 0.0
                 
                 # Add edge if coefficient is significant
-                if max_coeff > 1e-6:  # Threshold for numerical stability
+                if max_coeff > self.varlingam_threshold:  # Configurable threshold for edge significance
                     # Find the lag with maximum coefficient
                     best_local_idx = np.argmax(coeffs_across_lags)
                     best_lag_idx = lag_indices[best_local_idx]
