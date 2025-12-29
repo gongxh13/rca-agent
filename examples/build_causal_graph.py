@@ -26,8 +26,11 @@ def main():
     output_dir = "output/causal_graph"
     alpha = 0.05
     use_trace_prior = True
-    algorithm = 'pcmci'  # 'pc' or 'pcmci' (recommended for time series)
-    max_lag = 5  # Maximum time lag for PCMCI+ (only used if algorithm='pcmci')
+    algorithm = 'granger_pc'  # Options: 'pc', 'pcmci', 'granger', 'varlingam', 'granger_pc'
+    # 'granger' is recommended for fast analysis (good for large datasets)
+    # 'varlingam' is recommended for balanced speed and accuracy
+    # 'pcmci' is most accurate but slow
+    max_lag = 5  # Maximum time lag (used for time series algorithms)
     
     print("=" * 60)
     print("Causal Graph Construction")
@@ -35,7 +38,7 @@ def main():
     print(f"Data file: {data_file}")
     print(f"Topology file: {topology_file}")
     print(f"Algorithm: {algorithm}")
-    if algorithm == 'pcmci':
+    if algorithm in ['pcmci', 'granger', 'varlingam']:
         print(f"Max lag: {max_lag}")
     print(f"Alpha (significance level): {alpha}")
     print(f"Use trace prior: {use_trace_prior}")
@@ -66,7 +69,7 @@ def main():
         )
         results = preprocessor.prepare_causal_data(
             start_date="2021-03-04",
-            end_date="2021-03-25",
+            end_date="2021-03-05",
             include_app_metrics=True
         )
         wide_table = results['wide_table']
@@ -82,7 +85,7 @@ def main():
         use_trace_prior=use_trace_prior,
         verbose=True,
         algorithm=algorithm,
-        max_lag=max_lag if algorithm == 'pcmci' else 5
+        max_lag=max_lag
     )
     
     # Build causal graph
@@ -117,27 +120,29 @@ def main():
     print("=" * 60)
     print("Saving causal graph...")
     print("=" * 60)
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    # Create algorithm-specific output directory to avoid overwriting
+    algorithm_output_dir = Path(output_dir) / algorithm
+    algorithm_output_dir.mkdir(parents=True, exist_ok=True)
     
     builder.save_graph(
         graph=causal_graph,
-        output_path=f"{output_dir}/causal_graph.graphml",
+        output_path=str(algorithm_output_dir / "causal_graph.graphml"),
         format='graphml'
     )
     
     builder.save_edges_csv(
         graph=causal_graph,
-        output_path=f"{output_dir}/causal_edges.csv"
+        output_path=str(algorithm_output_dir / "causal_edges.csv")
     )
     
     # Save statistics
     import json
-    with open(f"{output_dir}/graph_statistics.json", 'w') as f:
+    with open(algorithm_output_dir / "graph_statistics.json", 'w') as f:
         json.dump(stats, f, indent=2, default=str)
     
     print()
     print("Done!")
-    print(f"Causal graph saved to {output_dir}/")
+    print(f"Causal graph saved to {algorithm_output_dir}/")
 
 
 if __name__ == "__main__":

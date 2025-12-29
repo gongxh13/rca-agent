@@ -19,7 +19,7 @@ def main():
     # Configuration
     dataset_path = "datasets/OpenRCA/Bank"
     start_date = "2021-03-04"
-    end_date = "2021-03-25"  # Use multiple days for better causal discovery
+    end_date = "2021-03-05"  # Use multiple days for better causal discovery
     time_granularity = "5min"  # 5 minutes for causal graph construction
     output_dir = "output/causal_data"
     include_app_metrics = True

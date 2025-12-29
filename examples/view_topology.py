@@ -104,7 +104,7 @@ def view_topology(graphml_path: str, output_image: str = None, layout: str = 'sp
     nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
     
     # Draw edge labels (weights) - position them closer to target node to show direction
-    edge_labels = {(u, v): str(d['weight']) for u, v, d in G.edges(data=True)}
+    edge_labels = {(u, v): str(d.get('weight', 1)) for u, v, d in G.edges(data=True)}
     # Position labels closer to target node to indicate direction
     nx.draw_networkx_edge_labels(
         G, pos, edge_labels, 

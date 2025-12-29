@@ -36,9 +36,18 @@ class CausalDataPreprocessor:
         'disk_space': ['disk', 'space', 'usage'],
         'jvm_cpu': ['_CPULoad'],
         'jvm_oom': ['HeapMemoryMax', 'HeapMemoryUsed'],
-        'network': ['NETBandwidthUtil', 'NETInErr', 'NETOutErr', 'TotalTcpConnNum', 
+        'network': ['NETBandwidthUtil', 'TotalTcpConnNum', 
                    'NetworkRxBytes', 'NetworkTxBytes']
     }
+    
+    # Metrics to exclude after extraction (used for calculation but not needed in final data)
+    EXCLUDED_METRICS = [
+        'HeapMemoryMax',      # Used for JVM_Heap_Usage calculation, not needed in final data
+        'NETInErr',           # Network error metrics excluded from causal analysis
+        'NETInErrPrc',        # Network error percentage metrics excluded
+        'NETOutErr',          # Network output error metrics excluded
+        'NETOutErrPrcc',      # Network output error percentage metrics excluded (note: Prcc typo)
+    ]
     
     # Candidate components (from OpenRCA)
     CANDIDATE_COMPONENTS = [
@@ -293,6 +302,10 @@ class CausalDataPreprocessor:
         if not df_filtered.empty:
             df_filtered = self._process_jvm_oom(df_filtered)
         
+        # Remove excluded metrics (used for calculation but not needed in final data)
+        if not df_filtered.empty:
+            df_filtered = self._remove_excluded_metrics(df_filtered)
+        
         return df_filtered
     
     def _process_jvm_oom(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -352,6 +365,33 @@ class CausalDataPreprocessor:
             df = pd.concat([df, jvm_oom_df], ignore_index=True)
         
         return df
+    
+    def _remove_excluded_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove metrics that are used for calculation but not needed in final data.
+        
+        This includes:
+        - HeapMemoryMax: Used to calculate JVM_Heap_Usage, but the original metric is not needed
+        - Network error metrics: NETInErr, NETInErrPrc, NETOutErr, NETOutErrPrcc
+        
+        Args:
+            df: DataFrame with metrics
+            
+        Returns:
+            DataFrame with excluded metrics removed
+        """
+        if df.empty:
+            return df
+        
+        # Build exclusion mask
+        exclude_mask = False
+        for pattern in self.EXCLUDED_METRICS:
+            exclude_mask |= df['kpi_name'].str.contains(pattern, na=False)
+        
+        # Remove excluded metrics
+        df_filtered = df[~exclude_mask].copy()
+        
+        return df_filtered
     
     def aggregate_metrics(
         self,
