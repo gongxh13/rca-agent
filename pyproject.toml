@@ -26,6 +26,7 @@ dependencies = [
     "dowhy >= 0.14",
     "scikit-learn >= 1.3",
     "scipy >= 1.11",
+    "tigramite >= 5.0.0",
 ]
 
 

@@ -4414,6 +4414,28 @@ files = [
 ]
 
 [[package]]
+name = "tigramite"
+version = "5.2.9.4"
+description = "Tigramite causal inference for time series"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "tigramite-5.2.9.4-py3-none-any.whl", hash = "sha256:65ed37c2f6ef3ab749a6f5e983269a92e6705a223cf459bd960f5c650e10ad5e"},
+    {file = "tigramite-5.2.9.4.tar.gz", hash = "sha256:9b8109ef6dd3e26bbead06b78ae48924714863bf9831da8f4950465ce6e5cc2d"},
+]
+
+[package.dependencies]
+numpy = ">=1.18"
+scipy = ">=1.10.0"
+six = "*"
+
+[package.extras]
+all = ["dcor (>=0.6)", "gpytorch (>=1.9.1)", "joblib (>=1.2.0)", "matplotlib (>=3.7.0)", "networkx (>=3.0)", "numba (>=0.58)", "ortools (>=9.2)", "pytorch (>=1.13.1)", "scikit-learn (>=1.2)", "seaborn (>=0.12.2)"]
+dev = ["dcor (>=0.6)", "gpytorch (>=1.9.1)", "joblib (>=1.2.0)", "matplotlib (>=3.7.0)", "networkx (>=3.0)", "numba (>=0.58)", "ortools (>=9.2)", "pytorch (>=1.13.1)", "scikit-learn (>=1.2)", "seaborn (>=0.12.2)"]
+test = ["dcor (>=0.6)", "gpytorch (>=1.9.1)", "networkx (>=3.0)", "nose", "pytest", "pytorch (>=1.13.1)", "scikit-learn (>=1.2)"]
+
+[[package]]
 name = "tiktoken"
 version = "0.12.0"
 description = "tiktoken is a fast BPE tokeniser for use with OpenAI's models"
@@ -5162,4 +5184,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "0377f25445b65dd7c028a67561ebf2e03c4361ef60b936c05d3051725464c784"
+content-hash = "71af351153f7377f39441d11e6590132aaaaf7102c5e5cbc26efac409de402d8"

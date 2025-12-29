@@ -26,12 +26,17 @@ def main():
     output_dir = "output/causal_graph"
     alpha = 0.05
     use_trace_prior = True
+    algorithm = 'pcmci'  # 'pc' or 'pcmci' (recommended for time series)
+    max_lag = 5  # Maximum time lag for PCMCI+ (only used if algorithm='pcmci')
     
     print("=" * 60)
     print("Causal Graph Construction")
     print("=" * 60)
     print(f"Data file: {data_file}")
     print(f"Topology file: {topology_file}")
+    print(f"Algorithm: {algorithm}")
+    if algorithm == 'pcmci':
+        print(f"Max lag: {max_lag}")
     print(f"Alpha (significance level): {alpha}")
     print(f"Use trace prior: {use_trace_prior}")
     print()
@@ -75,7 +80,9 @@ def main():
     builder = CausalGraphBuilder(
         alpha=alpha,
         use_trace_prior=use_trace_prior,
-        verbose=True
+        verbose=True,
+        algorithm=algorithm,
+        max_lag=max_lag if algorithm == 'pcmci' else 5
     )
     
     # Build causal graph
