@@ -1,0 +1,138 @@
+"""
+Example script for building causal graph.
+
+This script demonstrates how to use CausalGraphBuilder to construct
+causal graphs from preprocessed data.
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.causal.data_preprocessor import CausalDataPreprocessor
+from src.causal.causal_discovery import CausalGraphBuilder
+import networkx as nx
+
+
+def main():
+    """Main function."""
+    # Configuration
+    dataset_path = "datasets/OpenRCA/Bank"
+    data_file = "output/causal_data/all_data.csv"
+    topology_file = "output/causal_data/service_topology.graphml"
+    output_dir = "output/causal_graph"
+    alpha = 0.05
+    use_trace_prior = True
+    
+    print("=" * 60)
+    print("Causal Graph Construction")
+    print("=" * 60)
+    print(f"Data file: {data_file}")
+    print(f"Topology file: {topology_file}")
+    print(f"Alpha (significance level): {alpha}")
+    print(f"Use trace prior: {use_trace_prior}")
+    print()
+    
+    # Load data
+    print("Loading data...")
+    if Path(data_file).exists():
+        # Load preprocessed data
+        wide_table = pd.read_csv(data_file, index_col=0, parse_dates=True)
+        print(f"Loaded wide table: {wide_table.shape}")
+        
+        # Load service topology
+        service_topology = None
+        if Path(topology_file).exists():
+            service_topology = nx.read_graphml(topology_file)
+            print(f"Loaded service topology: {service_topology.number_of_nodes()} nodes, "
+                  f"{service_topology.number_of_edges()} edges")
+    else:
+        # Data file not found, run preprocessing
+        print(f"Data file not found: {data_file}")
+        print("Running data preprocessing first...")
+        
+        # Run preprocessing
+        preprocessor = CausalDataPreprocessor(
+            dataset_path=dataset_path,
+            time_granularity="5min"
+        )
+        results = preprocessor.prepare_causal_data(
+            start_date="2021-03-04",
+            end_date="2021-03-25",
+            include_app_metrics=True
+        )
+        wide_table = results['wide_table']
+        service_topology = results['service_topology']
+        
+        # Save for next time
+        Path("output/causal_data").mkdir(parents=True, exist_ok=True)
+        preprocessor.save_results(results, "output/causal_data", datetime_as_timestamp=True)
+    
+    # Initialize causal graph builder
+    builder = CausalGraphBuilder(
+        alpha=alpha,
+        use_trace_prior=use_trace_prior,
+        verbose=True
+    )
+    
+    # Build causal graph
+    print()
+    print("=" * 60)
+    print("Building causal graph...")
+    print("=" * 60)
+    causal_graph = builder.build_causal_graph(
+        data=wide_table,
+        service_topology=service_topology
+    )
+    
+    # Optimize graph
+    print()
+    print("Optimizing causal graph...")
+    causal_graph = builder.optimize_graph(
+        graph=causal_graph,
+        service_topology=service_topology
+    )
+    
+    # Get statistics
+    stats = builder.get_graph_statistics(causal_graph)
+    print()
+    print("=" * 60)
+    print("Graph Statistics")
+    print("=" * 60)
+    for key, value in stats.items():
+        print(f"  {key}: {value}")
+    
+    # Save graph
+    print()
+    print("=" * 60)
+    print("Saving causal graph...")
+    print("=" * 60)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    builder.save_graph(
+        graph=causal_graph,
+        output_path=f"{output_dir}/causal_graph.graphml",
+        format='graphml'
+    )
+    
+    builder.save_edges_csv(
+        graph=causal_graph,
+        output_path=f"{output_dir}/causal_edges.csv"
+    )
+    
+    # Save statistics
+    import json
+    with open(f"{output_dir}/graph_statistics.json", 'w') as f:
+        json.dump(stats, f, indent=2, default=str)
+    
+    print()
+    print("Done!")
+    print(f"Causal graph saved to {output_dir}/")
+
+
+if __name__ == "__main__":
+    main()
+

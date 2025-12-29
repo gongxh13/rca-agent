@@ -2,6 +2,7 @@ datasets
 
 # Generated data files
 data/
+output/
 
 # Idea files
 .DS_Store
