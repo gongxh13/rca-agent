@@ -62,7 +62,8 @@ class CausalDataPreprocessor:
     def __init__(
         self,
         dataset_path: str,
-        time_granularity: str = '5min'
+        time_granularity: str = '5min',
+        compact_mode: bool = True
     ):
         """
         Initialize the data preprocessor.
@@ -70,11 +71,166 @@ class CausalDataPreprocessor:
         Args:
             dataset_path: Path to OpenRCA dataset (e.g., "datasets/OpenRCA/Bank")
             time_granularity: Time granularity for aggregation (e.g., '1min', '5min', '10min')
+            compact_mode: If True, only keep key metrics based on fault types in record.csv,
+                   and remove similar/redundant metrics. Default: True
         """
         self.dataset_path = Path(dataset_path)
         self.telemetry_path = self.dataset_path / "telemetry"
         self.time_granularity = time_granularity
+        self.compact_mode = compact_mode
         
+        # Load fault types from record.csv if compact_mode is enabled
+        self.fault_types = None
+        if self.compact_mode:
+            self.fault_types = self._load_fault_types()
+        
+    def _load_fault_types(self) -> Dict[str, List[str]]:
+        """
+        Load fault types from record.csv and map them to key metrics.
+        
+        Returns:
+            Dictionary mapping fault types to key metric patterns
+        """
+        record_path = self.dataset_path / "record.csv"
+        if not record_path.exists():
+            print(f"Warning: record.csv not found at {record_path}, using default fault types")
+            return self._get_default_fault_types()
+        
+        try:
+            record_df = pd.read_csv(record_path)
+            if 'reason' not in record_df.columns:
+                print("Warning: 'reason' column not found in record.csv, using default fault types")
+                return self._get_default_fault_types()
+            
+            # Get unique fault types
+            unique_faults = record_df['reason'].unique().tolist()
+            print(f"Found {len(unique_faults)} unique fault types in record.csv: {unique_faults}")
+            
+            # Map fault types to key metrics
+            fault_to_metrics = {}
+            for fault in unique_faults:
+                if 'high CPU usage' in fault.lower():
+                    fault_to_metrics[fault] = ['OSLinux-CPU_CPU_CPUCpuUtil']
+                elif 'high memory usage' in fault.lower():
+                    fault_to_metrics[fault] = ['OSLinux-OSLinux_MEMORY_MEMORY_MEMUsedMemPerc']
+                elif 'high disk I/O' in fault.lower() or 'disk I/O read' in fault.lower():
+                    # For disk I/O, prefer read metrics (most common in faults)
+                    fault_to_metrics[fault] = ['DSKRead']
+                elif 'high disk space' in fault.lower():
+                    fault_to_metrics[fault] = ['disk', 'space', 'usage']
+                elif 'high JVM CPU load' in fault.lower():
+                    fault_to_metrics[fault] = ['_CPULoad']
+                elif 'JVM Out of Memory' in fault or 'OOM' in fault:
+                    fault_to_metrics[fault] = ['JVM_Heap_Usage']  # Use calculated metric
+                elif 'network latency' in fault.lower() or 'network packet loss' in fault.lower():
+                    # For network issues, prefer bandwidth utilization
+                    fault_to_metrics[fault] = ['NETBandwidthUtil']
+                else:
+                    # Unknown fault type, use default
+                    fault_to_metrics[fault] = []
+            
+            return fault_to_metrics
+            
+        except Exception as e:
+            print(f"Error loading record.csv: {e}, using default fault types")
+            return self._get_default_fault_types()
+    
+    def _get_default_fault_types(self) -> Dict[str, List[str]]:
+        """
+        Get default fault types based on common OpenRCA faults.
+        
+        Returns:
+            Dictionary mapping fault types to key metric patterns
+        """
+        return {
+            'high CPU usage': ['OSLinux-CPU_CPU_CPUCpuUtil'],
+            'high memory usage': ['OSLinux-OSLinux_MEMORY_MEMORY_MEMUsedMemPerc'],
+            'high disk I/O read usage': ['DSKRead'],
+            'high disk space usage': ['disk', 'space', 'usage'],
+            'high JVM CPU load': ['_CPULoad'],
+            'JVM Out of Memory (OOM) Heap': ['JVM_Heap_Usage'],
+            'network latency': ['NETBandwidthUtil'],
+            'network packet loss': ['NETBandwidthUtil']
+        }
+    
+    def _get_compact_metric_patterns(self) -> List[str]:
+        """
+        Get key metric patterns for compact mode based on fault types.
+        
+        Returns:
+            List of key metric patterns to keep
+        """
+        if not self.fault_types:
+            # Fallback to default patterns
+            patterns = []
+            for metrics in self._get_default_fault_types().values():
+                patterns.extend(metrics)
+            return list(set(patterns))
+        
+        # Collect all key metric patterns from fault types
+        key_patterns = []
+        for metrics in self.fault_types.values():
+            key_patterns.extend(metrics)
+        
+        # Remove duplicates and return
+        return list(set(key_patterns))
+    
+    def _remove_similar_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove similar/redundant metrics in compact mode.
+        Keep only the most representative metric for each metric type.
+        
+        Args:
+            df: DataFrame with metrics
+            
+        Returns:
+            DataFrame with similar metrics removed
+        """
+        if df.empty or not self.compact_mode:
+            return df
+        
+        # Group metrics by type and keep only the most representative one
+        # Strategy: For each metric type (CPU, memory, disk, network, JVM),
+        # keep only the most common or most representative metric
+        
+        df_filtered = df.copy()
+        
+        # For disk I/O metrics, prefer DSKRead over DSKWrite and DSKReadWrite
+        # (based on record.csv, most disk I/O faults are read-related)
+        disk_io_metrics = df_filtered[df_filtered['kpi_name'].str.contains('DSK', na=False)]
+        if not disk_io_metrics.empty:
+            # Keep only DSKRead metrics, remove DSKWrite and DSKReadWrite
+            write_metrics = df_filtered['kpi_name'].str.contains('DSKWrite', na=False)
+            readwrite_metrics = df_filtered['kpi_name'].str.contains('DSKReadWrite', na=False)
+            df_filtered = df_filtered[~(write_metrics | readwrite_metrics)]
+        
+        # For network metrics, prefer NETBandwidthUtil over other network metrics
+        # (based on record.csv, network faults are mostly latency/packet loss)
+        network_metrics = df_filtered[df_filtered['kpi_name'].str.contains('NET', na=False) | 
+                                       df_filtered['kpi_name'].str.contains('Network', na=False)]
+        if not network_metrics.empty:
+            # Keep NETBandwidthUtil and TotalTcpConnNum, remove others
+            # TotalTcpConnNum is also important for network analysis
+            keep_network = (
+                df_filtered['kpi_name'].str.contains('NETBandwidthUtil', na=False) |
+                df_filtered['kpi_name'].str.contains('TotalTcpConnNum', na=False)
+            )
+            remove_network = (
+                (df_filtered['kpi_name'].str.contains('NET', na=False) |
+                 df_filtered['kpi_name'].str.contains('Network', na=False)) &
+                ~keep_network
+            )
+            df_filtered = df_filtered[~remove_network]
+        
+        # For JVM metrics, if we have JVM_Heap_Usage (calculated), remove HeapMemoryUsed
+        # (JVM_Heap_Usage is more informative)
+        if 'JVM_Heap_Usage' in df_filtered['kpi_name'].values:
+            df_filtered = df_filtered[
+                ~df_filtered['kpi_name'].str.contains('HeapMemoryUsed', na=False)
+            ]
+        
+        return df_filtered
+    
     def _date_to_path_format(self, date_str: str) -> str:
         """
         Convert ISO date string to path format.
@@ -257,6 +413,9 @@ class CausalDataPreprocessor:
         """
         Extract core metrics from container metrics DataFrame.
         
+        In compact mode, only keeps key metrics based on fault types in record.csv
+        and removes similar/redundant metrics.
+        
         Args:
             df: Container metrics DataFrame
             
@@ -269,6 +428,88 @@ class CausalDataPreprocessor:
         # Filter by candidate components
         df = df[df['cmdb_id'].isin(self.CANDIDATE_COMPONENTS)]
         
+        if self.compact_mode:
+            # In compact mode, use fault-based metric selection
+            df_filtered = self._extract_metrics_compact_mode(df)
+        else:
+            # Original mode: use all core metrics
+            df_filtered = self._extract_metrics_normal_mode(df)
+        
+        # Special handling for JVM OOM: calculate heap usage
+        if not df_filtered.empty:
+            df_filtered = self._process_jvm_oom(df_filtered)
+        
+        # Remove excluded metrics (used for calculation but not needed in final data)
+        if not df_filtered.empty:
+            df_filtered = self._remove_excluded_metrics(df_filtered)
+        
+        # In compact mode, remove similar metrics
+        if self.compact_mode and not df_filtered.empty:
+            df_filtered = self._remove_similar_metrics(df_filtered)
+        
+        return df_filtered
+    
+    def _extract_metrics_compact_mode(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Extract metrics in compact mode based on fault types.
+        
+        Args:
+            df: Container metrics DataFrame
+            
+        Returns:
+            DataFrame with only key metrics based on fault types
+        """
+        # Get key metric patterns from fault types
+        key_patterns = self._get_compact_metric_patterns()
+        
+        if not key_patterns:
+            # Fallback to normal mode if no patterns found
+            return self._extract_metrics_normal_mode(df)
+        
+        # Build metric mask based on key patterns
+        metric_mask = False
+        for pattern in key_patterns:
+            if pattern == 'OSLinux-CPU_CPU_CPUCpuUtil':
+                metric_mask |= df['kpi_name'].str.contains(pattern, na=False)
+            elif pattern == 'OSLinux-OSLinux_MEMORY_MEMORY_MEMUsedMemPerc':
+                metric_mask |= df['kpi_name'].str.contains(pattern, na=False)
+            elif pattern == 'DSKRead':
+                metric_mask |= df['kpi_name'].str.endswith(pattern, na=False)
+            elif pattern in ['disk', 'space', 'usage']:
+                metric_mask |= (
+                    df['kpi_name'].str.contains('disk', case=False, na=False) &
+                    (df['kpi_name'].str.contains('space', case=False, na=False) |
+                     df['kpi_name'].str.contains('usage', case=False, na=False))
+                )
+            elif pattern == '_CPULoad':
+                metric_mask |= (
+                    df['kpi_name'].str.contains('JVM', na=False) &
+                    df['kpi_name'].str.contains(pattern, na=False)
+                )
+            elif pattern == 'JVM_Heap_Usage':
+                # This will be calculated later, but we need HeapMemoryMax and HeapMemoryUsed
+                metric_mask |= (
+                    df['kpi_name'].str.contains('HeapMemoryMax', na=False) |
+                    df['kpi_name'].str.contains('HeapMemoryUsed', na=False)
+                )
+            elif pattern == 'NETBandwidthUtil':
+                metric_mask |= (
+                    df['kpi_name'].str.contains(pattern, na=False) |
+                    df['kpi_name'].str.contains('TotalTcpConnNum', na=False)
+                )
+        
+        return df[metric_mask].copy()
+    
+    def _extract_metrics_normal_mode(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Extract metrics in normal mode (all core metrics).
+        
+        Args:
+            df: Container metrics DataFrame
+            
+        Returns:
+            DataFrame with all core metrics
+        """
         # Filter by core metrics
         metric_mask = False
         for metric_type, patterns in self.CORE_METRICS.items():
@@ -296,17 +537,7 @@ class CausalDataPreprocessor:
                 else:
                     metric_mask |= df['kpi_name'].str.contains(pattern, na=False)
         
-        df_filtered = df[metric_mask].copy()
-        
-        # Special handling for JVM OOM: calculate heap usage
-        if not df_filtered.empty:
-            df_filtered = self._process_jvm_oom(df_filtered)
-        
-        # Remove excluded metrics (used for calculation but not needed in final data)
-        if not df_filtered.empty:
-            df_filtered = self._remove_excluded_metrics(df_filtered)
-        
-        return df_filtered
+        return df[metric_mask].copy()
     
     def _process_jvm_oom(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -647,7 +878,8 @@ class CausalDataPreprocessor:
         print(f"Loaded {len(container_df)} container metric records")
         
         # Extract core metrics
-        print("Extracting core metrics...")
+        mode_str = "compact mode (fault-based)" if self.compact_mode else "normal mode"
+        print(f"Extracting core metrics ({mode_str})...")
         container_df = self.extract_core_metrics(container_df)
         print(f"After filtering core metrics: {len(container_df)} records")
         

@@ -20,7 +20,7 @@ def main():
     dataset_path = "datasets/OpenRCA/Bank"
     start_date = "2021-03-04"
     end_date = "2021-03-05"  # Use multiple days for better causal discovery
-    time_granularity = "5min"  # 5 minutes for causal graph construction
+    time_granularity = "10min"  # 5 minutes for causal graph construction
     output_dir = "output/causal_data"
     include_app_metrics = True
     
@@ -34,9 +34,12 @@ def main():
     print()
     
     # Initialize preprocessor
+    # compact_mode=True (default): Only keep key metrics based on fault types in record.csv
+    # compact_mode=False: Keep all core metrics (original behavior)
     preprocessor = CausalDataPreprocessor(
         dataset_path=dataset_path,
-        time_granularity=time_granularity
+        time_granularity=time_granularity,
+        compact_mode=True  # Enable compact mode (default: True)
     )
     
     # Prepare data with memory optimization

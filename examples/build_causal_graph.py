@@ -67,7 +67,7 @@ def main():
         # Run preprocessing
         preprocessor = CausalDataPreprocessor(
             dataset_path=dataset_path,
-            time_granularity="5min"
+            time_granularity="10min"
         )
         results = preprocessor.prepare_causal_data(
             start_date="2021-03-04",
@@ -88,7 +88,8 @@ def main():
         verbose=True,
         algorithm=algorithm,
         max_lag=max_lag,
-        varlingam_threshold=varlingam_threshold  # Control edge density for VARLiNGAM
+        varlingam_threshold=varlingam_threshold,  # Control edge density for VARLiNGAM
+        remove_multicollinearity=True,
     )
     
     # Build causal graph
