@@ -30,8 +30,8 @@ def main():
     # Fault scenario configuration
     # Example fault: ServiceTest1 latency increase
     # In a real scenario, these would come from an anomaly detector or user query
-    fault_start_time = "2021-03-04 1:00:00"
-    fault_end_time = "2021-03-04 1:30:00"
+    fault_start_time = "2021-03-04 22:00:00"
+    fault_end_time = "2021-03-04 22:30:00"
     FAULT_TIMEZONE = "Asia/Shanghai"  # Use "UTC" if timestamps are UTC; use "Asia/Shanghai" for 东8区
     target_node = None  # If None, auto-detect anomalous target(s)
     
@@ -73,8 +73,14 @@ def main():
     print("Loading anomaly data...")
     preprocessor = CausalDataPreprocessor(
         dataset_path=dataset_path,
-        time_granularity="1min" # Use finer granularity for RCA
+        time_granularity="1min", # Use finer granularity for RCA
+        compact_mode=True,
+        service_aggregation=True  # Enable service aggregation to match training data
     )
+    
+    # Define selected business services (should match training configuration)
+    # selected_business_services = None
+    selected_business_services = None# Example
     
     # Note: We need to ensure we get the same features as the training data
     # Ideally we should load from the same processed data or process it identically
@@ -84,7 +90,8 @@ def main():
             start_date=fault_start_time.split()[0], # Extract date part
             end_date=fault_end_time.split()[0],
             include_app_metrics=True,
-            chunksize=100000
+            chunksize=100000,
+            selected_business_services=selected_business_services
         )
         wide_table = results['wide_table']
         

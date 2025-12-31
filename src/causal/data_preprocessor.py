@@ -63,7 +63,8 @@ class CausalDataPreprocessor:
         self,
         dataset_path: str,
         time_granularity: str = '5min',
-        compact_mode: bool = True
+        compact_mode: bool = True,
+        service_aggregation: bool = False
     ):
         """
         Initialize the data preprocessor.
@@ -73,16 +74,37 @@ class CausalDataPreprocessor:
             time_granularity: Time granularity for aggregation (e.g., '1min', '5min', '10min')
             compact_mode: If True, only keep key metrics based on fault types in record.csv,
                    and remove similar/redundant metrics. Default: True
+            service_aggregation: If True, aggregate metrics for same-type services (e.g. Tomcat01, Tomcat02 -> Tomcat).
+                                 This helps avoid multicollinearity issues in causal graph construction.
         """
         self.dataset_path = Path(dataset_path)
         self.telemetry_path = self.dataset_path / "telemetry"
         self.time_granularity = time_granularity
         self.compact_mode = compact_mode
+        self.service_aggregation = service_aggregation
         
         # Load fault types from record.csv if compact_mode is enabled
         self.fault_types = None
         if self.compact_mode:
             self.fault_types = self._load_fault_types()
+            
+        # Derive service types from candidate components
+        self.service_types = sorted(list(set(self._get_service_type(c) for c in self.CANDIDATE_COMPONENTS)))
+
+    def _get_service_type(self, component_name: str) -> str:
+        """
+        Get service type from component name.
+        Removes trailing numbers (e.g., 'Tomcat01' -> 'Tomcat').
+        
+        Args:
+            component_name: Name of the component
+            
+        Returns:
+            Service type name
+        """
+        import re
+        # Remove trailing digits
+        return re.sub(r'\d+$', '', str(component_name))
         
     def _load_fault_types(self) -> Dict[str, List[str]]:
         """
@@ -646,9 +668,20 @@ class CausalDataPreprocessor:
         df.set_index('datetime', inplace=True)
         
         if metric_type == 'container':
-            # Group by component, metric, and time window
-            grouped = df.groupby(['cmdb_id', 'kpi_name']).resample(self.time_granularity)
-            aggregated = grouped['value'].mean().reset_index()
+            # Handle service aggregation if enabled
+            if self.service_aggregation:
+                # Map component IDs to service types
+                df['service_type'] = df['cmdb_id'].apply(self._get_service_type)
+                # Group by service type, metric, and time window
+                # Take mean of values across instances of same service type, then resample by time
+                grouped = df.groupby(['service_type', 'kpi_name']).resample(self.time_granularity)
+                aggregated = grouped['value'].mean().reset_index()
+                # Rename service_type back to cmdb_id for compatibility with downstream functions
+                aggregated.rename(columns={'service_type': 'cmdb_id'}, inplace=True)
+            else:
+                # Group by component, metric, and time window
+                grouped = df.groupby(['cmdb_id', 'kpi_name']).resample(self.time_granularity)
+                aggregated = grouped['value'].mean().reset_index()
         else:  # app metrics
             # Group by service and time window
             grouped = df.groupby('tc').resample(self.time_granularity)
@@ -837,7 +870,22 @@ class CausalDataPreprocessor:
         
         # Add edges with weights
         for (parent, child), weight in edge_counts.items():
-            G.add_edge(parent, child, weight=weight)
+            # If service aggregation is enabled, map components to service types
+            if self.service_aggregation:
+                parent_type = self._get_service_type(parent)
+                child_type = self._get_service_type(child)
+                
+                # Skip self-loops after aggregation (e.g. Tomcat01 -> Tomcat02 becomes Tomcat -> Tomcat)
+                if parent_type == child_type:
+                    continue
+                    
+                # Add or update edge
+                if G.has_edge(parent_type, child_type):
+                    G[parent_type][child_type]['weight'] += weight
+                else:
+                    G.add_edge(parent_type, child_type, weight=weight)
+            else:
+                G.add_edge(parent, child, weight=weight)
         
         # Clean up
         del span_to_service, edge_counts, all_traces
@@ -851,7 +899,8 @@ class CausalDataPreprocessor:
         end_date: str,
         include_app_metrics: bool = True,
         chunksize: Optional[int] = 100000,
-        trace_sample_ratio: Optional[float] = 0.1
+        trace_sample_ratio: Optional[float] = 0.1,
+        selected_business_services: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Prepare all data for causal analysis.
@@ -862,6 +911,9 @@ class CausalDataPreprocessor:
             include_app_metrics: Whether to include application metrics
             chunksize: Chunk size for reading large files (default: 100000)
             trace_sample_ratio: Sample ratio for trace data (default: 0.1 = 10%)
+            selected_business_services: List of business services to include (e.g. ['servicetest1', ...]).
+                                      If provided, only these services will be included in app metrics.
+                                      If None, all services are included.
             
         Returns:
             Dictionary containing:
@@ -885,6 +937,8 @@ class CausalDataPreprocessor:
         
         # Aggregate container metrics
         print("Aggregating container metrics...")
+        if self.service_aggregation:
+            print("Service aggregation enabled: aggregating metrics by service type (averaging across instances)")
         container_agg = self.aggregate_metrics(container_df, metric_type='container')
         print(f"Aggregated to {len(container_agg)} time points")
         
@@ -895,12 +949,20 @@ class CausalDataPreprocessor:
         app_agg = None
         app_df = None
         if include_app_metrics:
-            print("Loading application metrics...")
-            app_df = self.load_all_data(start_date, end_date, metric_type='app', chunksize=chunksize)
-            if not app_df.empty:
-                print(f"Loaded {len(app_df)} app metric records")
-                app_agg = self.aggregate_metrics(app_df, metric_type='app')
-                print(f"Aggregated to {len(app_agg)} time points")
+            if selected_business_services:
+                print("Loading application metrics...")
+                app_df = self.load_all_data(start_date, end_date, metric_type='app', chunksize=chunksize)
+                if not app_df.empty:
+                    print(f"Loaded {len(app_df)} app metric records")
+                    app_agg = self.aggregate_metrics(app_df, metric_type='app')
+                    print(f"Aggregated to {len(app_agg)} time points")
+                    
+                    # Filter by selected business services
+                    print(f"Filtering business services: keeping only {len(selected_business_services)} services")
+                    app_agg = app_agg[app_agg['tc'].isin(selected_business_services)]
+                    print(f"After filtering: {len(app_agg)} records")
+            else:
+                print("Skipping application metrics: selected_business_services is not provided")
         
         # Create wide table
         print("Creating wide table...")
@@ -991,7 +1053,11 @@ class CausalDataPreprocessor:
                     # Try to identify component (first part or first few parts)
                     # This is heuristic, but should work for most cases
                     component = parts[0]
+                    
+                    # Check if component is in candidate components or service types
                     if component in self.CANDIDATE_COMPONENTS:
+                        container_components.add(component)
+                    elif self.service_aggregation and component in self.service_types:
                         container_components.add(component)
         
         report = {

@@ -36,11 +36,21 @@ def main():
     # Initialize preprocessor
     # compact_mode=True (default): Only keep key metrics based on fault types in record.csv
     # compact_mode=False: Keep all core metrics (original behavior)
+    # service_aggregation=True: Aggregate metrics for same-type services (e.g. Tomcat01, Tomcat02 -> Tomcat)
+    #                          to avoid multicollinearity and reduce graph size
     preprocessor = CausalDataPreprocessor(
         dataset_path=dataset_path,
         time_granularity=time_granularity,
-        compact_mode=True  # Enable compact mode (default: True)
+        compact_mode=True,  # Enable compact mode (default: True)
+        service_aggregation=True  # Enable service aggregation
     )
+    
+    # Define selected business services (optional)
+    # If provided, only these services will be included in app metrics
+    # Example: ['servicetest1', 'servicetest2', ...]
+    # Leave as None to include all services
+    selected_business_services = None
+    # selected_business_services = [f'servicetest{i}' for i in range(1, 12)] # Example: Select specific services
     
     # Prepare data with memory optimization
     # chunksize: Read files in chunks to save memory (100000 rows per chunk)
@@ -50,7 +60,8 @@ def main():
         end_date=end_date,
         include_app_metrics=include_app_metrics,
         chunksize=100000,  # Read files in chunks to save memory
-        trace_sample_ratio=0.1  # Sample 10% of trace data (sufficient for topology)
+        trace_sample_ratio=0.1,  # Sample 10% of trace data (sufficient for topology)
+        selected_business_services=selected_business_services  # Filter business services
     )
     
     # Print summary
