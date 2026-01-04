@@ -54,5 +54,22 @@ def test_log_tools():
     )
     print(correlated)
 
+
+    out = tool.extract_log_templates_drain3(
+        start_time=start_time,
+        end_time=end_time,
+        service_name=None,
+        min_count=2,
+        include_params=True,
+        model_path="artifacts/drain3/cumulative_all/model.pkl",
+    )
+    print(out)
+
+    summary = tool.train_log_templates_drain3_cumulative(
+        date_list=["2021_03_04","2021_03_25"],
+        output_dir="artifacts/drain3/cumulative_all",
+    )
+    print(summary)
+
 if __name__ == "__main__":
     test_log_tools()

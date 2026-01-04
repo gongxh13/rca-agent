@@ -13,7 +13,7 @@ import json
 
 from .metric_tool import MetricAnalysisTool
 from .data_loader import OpenRCADataLoader
-from ..utils.time_utils import to_iso_shanghai
+from src.utils.time_utils import to_iso_shanghai
 
 try:
     import ruptures as rpt

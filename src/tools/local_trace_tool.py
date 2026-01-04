@@ -12,7 +12,7 @@ import networkx as nx
 
 from .trace_tool import TraceAnalysisTool
 from .data_loader import OpenRCADataLoader
-from ..utils.time_utils import to_iso_shanghai
+from src.utils.time_utils import to_iso_shanghai
 
 class LocalTraceAnalysisTool(TraceAnalysisTool):
     """

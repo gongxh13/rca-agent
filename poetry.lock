@@ -265,6 +265,18 @@ files = [
 ]
 
 [[package]]
+name = "cachetools"
+version = "4.2.1"
+description = "Extensible memoizing collections and decorators"
+optional = false
+python-versions = "~=3.5"
+groups = ["main"]
+files = [
+    {file = "cachetools-4.2.1-py3-none-any.whl", hash = "sha256:1d9d5f567be80f7c07d765e21b814326d78c61eb0c3a637dffc0e5d1796cb2e2"},
+    {file = "cachetools-4.2.1.tar.gz", hash = "sha256:f469e29e7aa4cff64d8de4aad95ce76de8ea1125a16c68e0d93f65c3c3dc92e9"},
+]
+
+[[package]]
 name = "causal-learn"
 version = "0.1.4.4"
 description = "causal-learn Python Package"
@@ -879,6 +891,25 @@ pydot = ["pydot (>=1.4.2,<2.0.0)"]
 pygraphviz = ["pygraphviz (>=1.9)"]
 
 [[package]]
+name = "drain3"
+version = "0.9.11"
+description = "Persistent & streaming log template miner"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "drain3-0.9.11.tar.gz", hash = "sha256:9ab4b1407fad74f56554ae371ef019c3c7985861631f4bab46a0e92585125f75"},
+]
+
+[package.dependencies]
+cachetools = "4.2.1"
+jsonpickle = "1.5.1"
+
+[package.extras]
+kafka = ["kafka-python (==2.0.1)"]
+redis = ["redis (==3.5.3)"]
+
+[[package]]
 name = "fonttools"
 version = "4.61.0"
 description = "Tools to manipulate font files"
@@ -1480,6 +1511,23 @@ files = [
 
 [package.dependencies]
 jsonpointer = ">=1.9"
+
+[[package]]
+name = "jsonpickle"
+version = "1.5.1"
+description = "Python library for serializing any arbitrary object graph into JSON"
+optional = false
+python-versions = ">=2.7"
+groups = ["main"]
+files = [
+    {file = "jsonpickle-1.5.1-py2.py3-none-any.whl", hash = "sha256:8eb8323f0e12cb40687f0445e2115d8165901e20ac670add55bb53a95c68c0e5"},
+    {file = "jsonpickle-1.5.1.tar.gz", hash = "sha256:060f97096559d1b86aa16cac2f4ea5f7b6da0c15d8a4de150b78013a886f9a51"},
+]
+
+[package.extras]
+docs = ["jaraco.packaging (>=3.2)", "rst.linker (>=1.9)", "sphinx"]
+testing = ["coverage (<5)", "ecdsa", "enum34 ; python_version == \"2.7\"", "feedparser", "jsonlib ; python_version == \"2.7\"", "numpy", "pandas", "pymongo", "pytest (>=3.5,!=3.7.3)", "pytest-black-multipy", "pytest-checkdocs (>=1.2.3)", "pytest-cov", "pytest-flake8", "sklearn", "sqlalchemy"]
+testing-libs = ["demjson", "simplejson", "ujson", "yajl"]
 
 [[package]]
 name = "jsonpointer"
@@ -5345,4 +5393,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "501e9cd81acc72f381b61eb02e28dd0e14304ec711c9020e9e12e2bf738e1efe"
+content-hash = "837cb04bbba5e7b06a14789944cb78ad6770ca07636a8db539ea0ea0928df1e5"

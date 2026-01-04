@@ -28,6 +28,7 @@ dependencies = [
     "scipy >= 1.11",
     "tigramite >= 5.0.0",
     "pyecharts (>=2.0.9,<3.0.0)",
+    "drain3 >= 0.9",
 ]
 
 

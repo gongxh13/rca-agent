@@ -49,6 +49,7 @@ class LogAnalysisTool(BaseRCATool):
             self.analyze_error_frequency,
             self.find_correlated_events,
             self.query_logs,
+            self.extract_log_templates_drain3,
         ]
     
     # High-level semantic operations decorated with @tool
@@ -189,6 +190,45 @@ class LogAnalysisTool(BaseRCATool):
             
         Returns:
             Formatted string containing raw log entries with timestamps, services, and content
+        """
+        raise NotImplementedError()
+    
+    @tool
+    def extract_log_templates_drain3(
+        self,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        service_name: Optional[str] = None,
+        top_n: int = 50,
+        min_count: int = 2,
+        config_path: Optional[str] = None,
+        include_params: bool = False,
+        model_path: Optional[str] = None
+    ) -> str:
+        """Extract log templates with Drain3 within a time window and count frequencies.
+        
+        This tool performs template-level pattern mining suitable for OpenRCA logs:
+        - Online mining: incrementally clusters the current window’s logs into templates, no pretraining required
+        - Pretrained matching: load a pretrained Drain3 miner (model_path) and re-count matches within the window
+        - Optional parameter examples: provide one parameter example per template to illustrate variable parts
+        
+        Usage recommendations:
+        - For single-window analysis, online mining is sufficient
+        - For cross-window template stability or faster matching, pretrain and provide model_path
+        - For stronger normalization, provide config_path to enable masking rules
+        
+        Args:
+            start_time: Start time (ISO, YYYY-MM-DDTHH:MM:SS)
+            end_time: End time (ISO)
+            service_name: Filter by service (cmdb_id); None means all services
+            top_n: Maximum number of templates to return
+            min_count: Minimum frequency threshold to include a template
+            config_path: Path to Drain3 INI configuration
+            include_params: Whether to return one parameter example per template
+            model_path: Path to pretrained Drain3 miner pickle
+        
+        Returns:
+            Text summary: templates with counts and optional parameter examples
         """
         raise NotImplementedError()
     
