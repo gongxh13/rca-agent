@@ -5,6 +5,8 @@ Test script for LocalTraceAnalysisTool
 from src.tools.local_trace_tool import LocalTraceAnalysisTool
 import logging
 
+import os
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
@@ -44,6 +46,27 @@ def test_traces():
     trace_id = "gw0120210304091259219332"
     print(f"Analyzing trace: {trace_id}")
     print(tool.analyze_call_chain(trace_id, start_time, end_time))
+
+    print("\n6. Testing anomaly model training and detection:")
+
+    train_start = "2021-03-04T00:00:00"
+    train_end = "2021-03-04T01:00:00"
+    model_path = "tmp_trace_model.pkl"
+    
+    print(f"Training model on {train_start} to {train_end}...")
+    print(tool.train_anomaly_model(train_start, train_end, save_path=model_path))
+    
+    # Detect on next 10 mins
+    detect_start = "2021-03-04T01:30:00"
+    detect_end = "2021-03-04T02:00:00"
+    
+    print(f"Detecting anomalies on {detect_start} to {detect_end}...")
+    print(tool.detect_anomalies_with_model(detect_start, detect_end, model_path=model_path))
+    
+    # Cleanup
+    if os.path.exists(model_path):
+        os.remove(model_path)
+        print(f"\nCleaned up temporary model file: {model_path}")
 
 if __name__ == "__main__":
     test_traces()

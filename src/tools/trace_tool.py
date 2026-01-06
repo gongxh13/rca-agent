@@ -189,6 +189,53 @@ class TraceAnalysisTool(BaseRCATool):
             A formatted list of bottlenecks with impact analysis and recommendations
         """
         raise NotImplementedError()
+
+    @tool
+    def train_anomaly_model(
+        self,
+        start_time: str,
+        end_time: str,
+        save_path: Optional[str] = None
+    ) -> str:
+        """Train anomaly detection model using trace data from the specified period.
+
+        This method trains an unsupervised anomaly detection model (Isolation Forest) based on trace duration.
+        It learns the normal behavior of service calls (Parent -> Child) during the specified time range.
+        
+        Args:
+            start_time: Start time for training data in ISO format (e.g., "2021-03-04T00:00:00")
+            end_time: End time for training data in ISO format (e.g., "2021-03-04T00:30:00")
+            save_path: Optional path to save the trained model (e.g., "models/trace_model.pkl"). 
+                       If not provided, the model is kept in memory.
+            
+        Returns:
+            A status message indicating the number of trained service dependency models.
+        """
+        raise NotImplementedError()
+
+    @tool
+    def detect_anomalies_with_model(
+        self,
+        start_time: str,
+        end_time: str,
+        model_path: Optional[str] = None
+    ) -> str:
+        """Detect anomalies using the trained model.
+
+        This method uses the previously trained model (Isolation Forest) to detect anomalies in trace duration
+        during the specified analysis period. It identifies service calls that significantly deviate from 
+        the learned normal patterns.
+        
+        Args:
+            start_time: Analysis start time in ISO format
+            end_time: Analysis end time in ISO format
+            model_path: Optional path to load the model from. If not provided, uses the in-memory model.
+            
+        Returns:
+            A formatted string listing detected anomalies, including affected services, timestamps, 
+            durations, and deviation scores.
+        """
+        raise NotImplementedError()
     
     def cleanup(self) -> None:
         """Clean up trace data source connections."""

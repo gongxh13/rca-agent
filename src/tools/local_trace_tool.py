@@ -4,11 +4,14 @@ Local Trace Analysis Tool
 Implementation of TraceAnalysisTool for OpenRCA dataset.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from datetime import datetime
 import networkx as nx
+from sklearn.ensemble import IsolationForest
+import pickle
+import os
 
 from .trace_tool import TraceAnalysisTool
 from .data_loader import OpenRCADataLoader
@@ -22,12 +25,235 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.loader = None
+        self.trace_detectors = {}
+        self.normal_stats = {}
         
     def initialize(self) -> None:
         """Initialize the data loader."""
         dataset_path = self.config.get("dataset_path", "datasets/OpenRCA/Bank")
         default_tz = self.config.get("default_timezone", "Asia/Shanghai")
         self.loader = OpenRCADataLoader(dataset_path, default_timezone=default_tz)
+        
+    def _slide_window(self, df: pd.DataFrame, win_size_ms: int = 30000) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Calculate mean duration using sliding window.
+        
+        Args:
+            df: DataFrame with 'timestamp' (ms) and 'duration'
+            win_size_ms: Window size in milliseconds
+            
+        Returns:
+            Tuple of (window_start_times, mean_durations)
+        """
+        window_start_times = []
+        durations = []
+        
+        if df.empty:
+            return np.array([]), np.array([])
+            
+        time_min = df['timestamp'].min()
+        time_max = df['timestamp'].max()
+        
+        # Sliding window
+        i = time_min
+        while i < time_max:
+            # Select data in window [i, i + win_size)
+            temp_df = df[(df['timestamp'] >= i) & (df['timestamp'] < i + win_size_ms)]
+            
+            if not temp_df.empty:
+                window_start_times.append(i)
+                durations.append(temp_df['duration'].mean())
+            
+            i += win_size_ms
+        
+        return np.array(window_start_times), np.array(durations)
+
+    def train_anomaly_model(
+        self,
+        start_time: str,
+        end_time: str,
+        save_path: Optional[str] = None
+    ) -> str:
+        """
+        Train anomaly detection model using trace data from the specified period.
+        
+        Args:
+            start_time: Start time for training data
+            end_time: End time for training data
+            save_path: Optional path to save the trained model
+            
+        Returns:
+            Status message
+        """
+        if not self.loader:
+            self.initialize()
+            
+        df = self.loader.load_traces_for_time_range(start_time, end_time)
+        if df.empty:
+            return "No trace data found for training period."
+            
+        # Prepare data: Join with parent to identify (parent_service, child_service)
+        spans = df[['span_id', 'cmdb_id', 'parent_id', 'timestamp', 'duration']].copy()
+        
+        # Self join to find parent service
+        merged = pd.merge(
+            spans,
+            spans[['span_id', 'cmdb_id']],
+            left_on='parent_id',
+            right_on='span_id',
+            suffixes=('', '_parent'),
+            how='left'
+        )
+        
+        # Fill missing parent service with 'unknown' or 'external'
+        merged['cmdb_id_parent'] = merged['cmdb_id_parent'].fillna('unknown')
+        
+        # Group by parent -> child
+        grouped = merged.groupby(['cmdb_id_parent', 'cmdb_id'])
+        
+        self.trace_detectors = {}
+        self.normal_stats = {}
+        
+        count = 0
+        for (parent, child), group_df in grouped:
+            # Use sliding window to extract features
+            _, durs = self._slide_window(group_df)
+            
+            if len(durs) < 10:  # Skip if too few samples
+                continue
+                
+            # Train Isolation Forest
+            clf = IsolationForest(random_state=42, n_estimators=100, contamination=0.01)
+            clf.fit(durs.reshape(-1, 1))
+            
+            key = f"{parent}->{child}"
+            self.trace_detectors[key] = clf
+            self.normal_stats[key] = {
+                'mean': float(np.mean(durs)),
+                'std': float(np.std(durs)),
+                'count': len(durs)
+            }
+            count += 1
+            
+        if save_path:
+            dirname = os.path.dirname(save_path)
+            if dirname:
+                os.makedirs(dirname, exist_ok=True)
+            with open(save_path, 'wb') as f:
+                pickle.dump({'detectors': self.trace_detectors, 'stats': self.normal_stats}, f)
+        print(f"{self.trace_detectors}")
+        print(f"{self.normal_stats}")
+        return f"Trained anomaly detection models for {count} service dependencies."
+
+    def detect_anomalies_with_model(
+        self,
+        start_time: str,
+        end_time: str,
+        model_path: Optional[str] = None
+    ) -> str:
+        """
+        Detect anomalies using the trained model (Isolation Forest).
+        
+        Args:
+            start_time: Analysis start time
+            end_time: Analysis end time
+            model_path: Optional path to load model from
+            
+        Returns:
+            Formatted string of anomalies
+        """
+        if not self.loader:
+            self.initialize()
+            
+        # Load model if provided
+        if model_path and os.path.exists(model_path):
+            try:
+                with open(model_path, 'rb') as f:
+                    data = pickle.load(f)
+                    self.trace_detectors = data.get('detectors', {})
+                    self.normal_stats = data.get('stats', {})
+            except Exception as e:
+                return f"Error loading model: {e}"
+        
+        if not self.trace_detectors:
+            return "No trained models available. Please train a model first."
+            
+        df = self.loader.load_traces_for_time_range(start_time, end_time)
+        if df.empty:
+            return "No trace data found for analysis period."
+            
+        # Prepare data
+        spans = df[['span_id', 'cmdb_id', 'parent_id', 'timestamp', 'duration', 'trace_id', 'datetime']].copy()
+        
+        merged = pd.merge(
+            spans,
+            spans[['span_id', 'cmdb_id']],
+            left_on='parent_id',
+            right_on='span_id',
+            suffixes=('', '_parent'),
+            how='left'
+        )
+        merged['cmdb_id_parent'] = merged['cmdb_id_parent'].fillna('unknown')
+        
+        grouped = merged.groupby(['cmdb_id_parent', 'cmdb_id'])
+        
+        anomalies = []
+        
+        for (parent, child), group_df in grouped:
+            key = f"{parent}->{child}"
+            if key not in self.trace_detectors:
+                continue
+                
+            clf = self.trace_detectors[key]
+            
+            # Sliding window for detection
+            # Note: For precise anomaly localization (which specific span), sliding window might smooth it out too much
+            # But since we trained on smoothed data, we should predict on smoothed data?
+            # MicroRCA does predict on sliding window durations.
+            
+            window_starts, durs = self._slide_window(group_df)
+            
+            if len(durs) == 0:
+                continue
+                
+            preds = clf.predict(durs.reshape(-1, 1))
+            anomaly_indices = [i for i, x in enumerate(preds) if x == -1]
+            
+            if anomaly_indices:
+                stats = self.normal_stats.get(key, {})
+                normal_mean = stats.get('mean', 'N/A')
+                
+                for idx in anomaly_indices:
+                    timestamp = window_starts[idx]
+                    duration = durs[idx]
+                    
+                    # Find approximate timestamp in readable format
+                    dt_str = pd.to_datetime(timestamp, unit='ms', utc=True).tz_convert(self.loader._tz).isoformat()
+                    
+                    anomalies.append({
+                        'service': child,
+                        'parent': parent,
+                        'timestamp': dt_str,
+                        'duration': duration,
+                        'normal_mean': normal_mean,
+                        'score': duration / normal_mean if isinstance(normal_mean, (int, float)) and normal_mean > 0 else 0
+                    })
+                    
+        if not anomalies:
+            return "No anomalies detected using the trained model."
+            
+        # Sort by deviation (score)
+        anomalies.sort(key=lambda x: x['score'], reverse=True)
+        
+        result = [f"Detected {len(anomalies)} anomalies using Isolation Forest:"]
+        for a in anomalies[:20]: # Show top 20
+            result.append(
+                f"- Service: {a['service']} (called by {a['parent']}) "
+                f"at {a['timestamp']}: Duration {a['duration']:.2f}ms "
+                f"(Normal Mean: {a['normal_mean']:.2f}ms)"
+            )
+            
+        return "\n".join(result)
         
     def find_slow_spans(
         self,

@@ -48,10 +48,94 @@ class MetricAnalysisTool(BaseRCATool):
             self.detect_metric_anomalies,
             self.get_available_components,
             self.get_available_metrics,
+            self.compare_service_metrics,
+            self.compare_container_metrics,
+            self.get_metric_statistics,
         ]
     
     # Application Metrics Tools (service-level analysis)
     
+    @tool
+    def compare_service_metrics(
+        self,
+        start_time: str,
+        end_time: str,
+        baseline_start: Optional[str] = None,
+        baseline_end: Optional[str] = None,
+        service_name: Optional[str] = None
+    ) -> str:
+        """Compare service metrics between a target period and a baseline period.
+        
+        Analyzes performance metrics (response time, success rate, etc.) for a specific time range
+        and compares them against a baseline period to identify deviations and anomalies.
+        If baseline period is not provided, it attempts to infer one.
+        
+        Args:
+            start_time: Target period start time (ISO format)
+            end_time: Target period end time (ISO format)
+            baseline_start: Optional baseline period start time (ISO format)
+            baseline_end: Optional baseline period end time (ISO format)
+            service_name: Optional specific service to analyze
+            
+        Returns:
+            Detailed comparison report highlighting changes in metrics, including
+            percentage changes and robust statistical analysis (outliers removed).
+        """
+        raise NotImplementedError()
+
+    @tool
+    def compare_container_metrics(
+        self,
+        start_time: str,
+        end_time: str,
+        component_name: str,
+        metric_pattern: Optional[str] = None,
+        baseline_start: Optional[str] = None,
+        baseline_end: Optional[str] = None
+    ) -> str:
+        """Compare container/infrastructure metrics between a target period and a baseline period.
+        
+        Analyzes infrastructure metrics (CPU, Memory, Disk, etc.) for a specific component
+        and compares them against a baseline period.
+        
+        Args:
+            start_time: Target period start time (ISO format)
+            end_time: Target period end time (ISO format)
+            component_name: Name of the component to analyze (e.g., 'Tomcat01')
+            metric_pattern: Optional pattern to filter metrics (e.g., 'CPU', 'Memory')
+            baseline_start: Optional baseline period start time
+            baseline_end: Optional baseline period end time
+            
+        Returns:
+            Comparison report for matching metrics.
+        """
+        raise NotImplementedError()
+
+    @tool
+    def get_metric_statistics(
+        self,
+        start_time: str,
+        end_time: str,
+        component_name: str,
+        metric_name: str
+    ) -> str:
+        """Get detailed statistical breakdown for a specific metric (MicroRCA style).
+        
+        Provides comprehensive statistics including mean, std, min, max,
+        percentiles (p25, p50, p75, p95, p99), and non-zero ratios.
+        Useful for deep-dive analysis of a specific anomalous metric.
+        
+        Args:
+            start_time: Start time (ISO format)
+            end_time: End time (ISO format)
+            component_name: Name of the component (e.g., 'Tomcat01')
+            metric_name: Exact name of the metric (e.g., 'OSLinux-CPU_CPU_CPUCpuUtil')
+            
+        Returns:
+            JSON-formatted string with detailed statistics.
+        """
+        raise NotImplementedError()
+
     @tool
     def get_service_performance(
         self,

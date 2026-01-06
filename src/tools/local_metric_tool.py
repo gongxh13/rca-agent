@@ -5,10 +5,10 @@ Concrete implementation of MetricAnalysisTool for the OpenRCA dataset.
 Uses local CSV files via OpenRCADataLoader to provide metric analysis.
 """
 
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Tuple
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 from .metric_tool import MetricAnalysisTool
@@ -49,6 +49,251 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
         """Check if data loader is initialized."""
         if not self.data_loader:
             raise RuntimeError("Tool not initialized. Call initialize() first.")
+
+    def _calculate_robust_stats(self, df: pd.DataFrame, columns: List[str] = None) -> Dict[str, Dict[str, float]]:
+        """Calculate robust statistics with outlier removal (inspired by MicroRCA)."""
+        if columns is None:
+            # If no columns specified, use all numeric columns
+            columns = df.select_dtypes(include=[np.number]).columns.tolist()
+            # If specific known service columns exist, prefer them for defaults
+            default_cols = ['mrt', 'sr', 'rr', 'cnt', 'value']
+            known_cols = [c for c in default_cols if c in df.columns]
+            if known_cols and len(columns) > len(known_cols):
+                 # If we found our standard columns, prioritize them, but here we just take what's asked
+                 pass
+        
+        columns = [col for col in columns if col in df.columns]
+        descriptions = {}
+        
+        for column in columns:
+            col_data = df[column].dropna().sort_values()
+            
+            # Robust stats logic
+            if len(col_data) > 4:
+                # Remove top/bottom 2 (outliers)
+                trimmed_data = col_data.iloc[2:-2]
+            else:
+                trimmed_data = col_data
+                
+            if trimmed_data.empty:
+                continue
+
+            desc = trimmed_data.describe(percentiles=[0.25, 0.5, 0.75, 0.95, 0.99]).to_dict()
+            
+            # Add non-zero ratio
+            non_zero_ratio = (trimmed_data != 0).sum() / len(trimmed_data)
+            desc['non_zero_ratio'] = round(non_zero_ratio, 3)
+            descriptions[column] = desc
+            
+        return descriptions
+
+    def _infer_baseline_period(self, start_time: str, end_time: str) -> Tuple[str, str]:
+        """Infer a baseline period immediately preceding the target period."""
+        try:
+            target_start = pd.Timestamp(start_time)
+            target_end = pd.Timestamp(end_time)
+            duration = target_end - target_start
+            
+            # Baseline ends at target start, starts duration before that
+            baseline_end = target_start
+            baseline_start = baseline_end - duration
+            
+            return to_iso_shanghai(baseline_start), to_iso_shanghai(baseline_end)
+        except Exception as e:
+            # Fallback if parsing fails (shouldn't happen with valid ISO)
+            print(f"Error inferring baseline: {e}")
+            return "", ""
+
+    def compare_service_metrics(
+        self,
+        start_time: str,
+        end_time: str,
+        baseline_start: Optional[str] = None,
+        baseline_end: Optional[str] = None,
+        service_name: Optional[str] = None
+    ) -> str:
+        self._check_loader()
+        
+        # 1. Load Target Data
+        target_df = self.data_loader.load_metrics_for_time_range(start_time, end_time, "app")
+        if target_df.empty:
+            return f"No application metrics found between {start_time} and {end_time}"
+            
+        # 2. Determine Baseline
+        if not baseline_start or not baseline_end:
+            baseline_start, baseline_end = self._infer_baseline_period(start_time, end_time)
+            
+        # 3. Load Baseline Data
+        baseline_df = self.data_loader.load_metrics_for_time_range(baseline_start, baseline_end, "app")
+        
+        # 4. Filter by service if requested
+        if service_name:
+            target_df = target_df[target_df['tc'] == service_name]
+            if not baseline_df.empty:
+                baseline_df = baseline_df[baseline_df['tc'] == service_name]
+            
+            if target_df.empty:
+                 return f"No metrics found for service '{service_name}' in target range"
+        
+        # 5. Group by Service and Compare
+        services = sorted(target_df['tc'].unique())
+        output = [f"Service Metric Comparison:"]
+        output.append(f"Target Period:   {start_time} to {end_time}")
+        output.append(f"Baseline Period: {baseline_start} to {baseline_end}")
+        if baseline_df.empty:
+             output.append("⚠️ No baseline data found. Showing target stats only.")
+        
+        for svc in services:
+            svc_target = target_df[target_df['tc'] == svc]
+            svc_baseline = baseline_df[baseline_df['tc'] == svc] if not baseline_df.empty else pd.DataFrame()
+            
+            output.append(f"\nService: {svc}")
+            
+            # Calculate stats
+            target_stats = self._calculate_robust_stats(svc_target)
+            baseline_stats = self._calculate_robust_stats(svc_baseline) if not svc_baseline.empty else {}
+            
+            # Compare key metrics: mrt (response time), sr (success rate)
+            # Map friendly names to columns
+            metrics_map = {'mrt': 'Response Time (ms)', 'sr': 'Success Rate (%)', 'rr': 'Request Rate (req/s)', 'cnt': 'Total Requests'}
+            
+            for col, name in metrics_map.items():
+                if col in target_stats:
+                    t_mean = target_stats[col]['mean']
+                    
+                    if col in baseline_stats:
+                        b_mean = baseline_stats[col]['mean']
+                        diff = t_mean - b_mean
+                        pct_change = (diff / b_mean * 100) if b_mean != 0 else 0.0
+                        
+                        # Determine if change is significant/bad
+                        change_icon = ""
+                        if col == 'mrt':
+                             if pct_change > 20: change_icon = "⚠️ (SLOWER)"
+                             elif pct_change < -20: change_icon = "✅ (FASTER)"
+                        elif col == 'sr':
+                             if diff < -0.1: change_icon = "⚠️ (ERRORS UP)" # Drop in success rate
+                        
+                        output.append(f"  - {name}: {b_mean:.2f} -> {t_mean:.2f} ({pct_change:+.1f}%) {change_icon}")
+                        
+                        # Add detailed stats for latency
+                        if col == 'mrt':
+                             t_p99 = target_stats[col]['99%']
+                             b_p99 = baseline_stats[col]['99%']
+                             output.append(f"    p99: {b_p99:.2f} -> {t_p99:.2f}")
+                    else:
+                        output.append(f"  - {name}: {t_mean:.2f} (No baseline)")
+
+        return "\n".join(output)
+
+    def compare_container_metrics(
+        self,
+        start_time: str,
+        end_time: str,
+        component_name: str,
+        metric_pattern: Optional[str] = None,
+        baseline_start: Optional[str] = None,
+        baseline_end: Optional[str] = None
+    ) -> str:
+        self._check_loader()
+        
+        # 1. Load Target Data
+        target_df = self.data_loader.load_metrics_for_time_range(start_time, end_time, "container")
+        if target_df.empty:
+            return f"No container metrics found between {start_time} and {end_time}"
+            
+        # 2. Filter by component
+        target_df = target_df[target_df['cmdb_id'] == component_name]
+        if target_df.empty:
+            return f"No metrics found for component '{component_name}' in target range"
+            
+        # 3. Filter by metric pattern
+        if metric_pattern:
+            target_df = target_df[target_df['kpi_name'].str.contains(metric_pattern, case=False, na=False)]
+            if target_df.empty:
+                return f"No metrics matching pattern '{metric_pattern}' for component '{component_name}'"
+
+        # 4. Determine Baseline
+        if not baseline_start or not baseline_end:
+            baseline_start, baseline_end = self._infer_baseline_period(start_time, end_time)
+            
+        # 5. Load Baseline Data
+        baseline_df = self.data_loader.load_metrics_for_time_range(baseline_start, baseline_end, "container")
+        if not baseline_df.empty:
+             baseline_df = baseline_df[baseline_df['cmdb_id'] == component_name]
+             if metric_pattern:
+                 baseline_df = baseline_df[baseline_df['kpi_name'].str.contains(metric_pattern, case=False, na=False)]
+        
+        # 6. Group by Metric Name (kpi_name) and Compare
+        metrics = sorted(target_df['kpi_name'].unique())
+        output = [f"Container Metric Comparison for {component_name}:"]
+        output.append(f"Target Period:   {start_time} to {end_time}")
+        output.append(f"Baseline Period: {baseline_start} to {baseline_end}")
+        
+        if baseline_df.empty:
+             output.append("⚠️ No baseline data found. Showing target stats only.")
+             
+        for metric in metrics:
+            metric_target = target_df[target_df['kpi_name'] == metric]
+            metric_baseline = baseline_df[baseline_df['kpi_name'] == metric] if not baseline_df.empty else pd.DataFrame()
+            
+            # Calculate stats on 'value' column
+            target_stats = self._calculate_robust_stats(metric_target, columns=['value'])
+            baseline_stats = self._calculate_robust_stats(metric_baseline, columns=['value']) if not metric_baseline.empty else {}
+            
+            if 'value' in target_stats:
+                t_mean = target_stats['value']['mean']
+                t_p99 = target_stats['value']['99%']
+                
+                if 'value' in baseline_stats:
+                    b_mean = baseline_stats['value']['mean']
+                    b_p99 = baseline_stats['value']['99%']
+                    
+                    diff = t_mean - b_mean
+                    pct_change = (diff / b_mean * 100) if b_mean != 0 else 0.0
+                    
+                    # Heuristic for "Bad" change (very simple)
+                    change_icon = ""
+                    if pct_change > 20: change_icon = "⚠️ (+)"
+                    elif pct_change < -20: change_icon = "📉 (-)"
+                    
+                    output.append(f"\nMetric: {metric}")
+                    output.append(f"  - Mean: {b_mean:.2f} -> {t_mean:.2f} ({pct_change:+.1f}%) {change_icon}")
+                    output.append(f"  - P99:  {b_p99:.2f} -> {t_p99:.2f}")
+                else:
+                    output.append(f"\nMetric: {metric}")
+                    output.append(f"  - Mean: {t_mean:.2f} (No baseline)")
+                    output.append(f"  - P99:  {t_p99:.2f}")
+
+        return "\n".join(output)
+
+    def get_metric_statistics(
+        self,
+        start_time: str,
+        end_time: str,
+        component_name: str,
+        metric_name: str
+    ) -> str:
+        self._check_loader()
+        
+        df = self.data_loader.load_metrics_for_time_range(start_time, end_time, "container")
+        if df.empty:
+            return json.dumps({"error": "No metrics found in time range"})
+            
+        df = df[(df['cmdb_id'] == component_name) & (df['kpi_name'] == metric_name)]
+        if df.empty:
+            return json.dumps({"error": f"No data found for {component_name} - {metric_name}"})
+            
+        stats = self._calculate_robust_stats(df, columns=['value'])
+        
+        result = {
+            "component": component_name,
+            "metric": metric_name,
+            "period": {"start": start_time, "end": end_time},
+            "statistics": stats.get('value', {})
+        }
+        
+        return json.dumps(result, indent=2)
 
     # Application Metrics Tools
     
