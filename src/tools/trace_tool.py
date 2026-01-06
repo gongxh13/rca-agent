@@ -42,12 +42,12 @@ class TraceAnalysisTool(BaseRCATool):
     def get_tools(self) -> List[Any]:
         """Get list of LangChain tools for trace analysis."""
         return [
-            self.find_slow_spans,
-            self.analyze_call_chain,
-            self.get_service_dependencies,
-            self.detect_latency_anomalies,
-            self.identify_bottlenecks,
-            self.detect_anomalies_with_model,
+            self._build_structured_tool(self.find_slow_spans, "find_slow_spans"),
+            self._build_structured_tool(self.analyze_call_chain, "analyze_call_chain"),
+            self._build_structured_tool(self.get_service_dependencies, "get_service_dependencies"),
+            self._build_structured_tool(self.detect_latency_anomalies, "detect_latency_anomalies"),
+            self._build_structured_tool(self.identify_bottlenecks, "identify_bottlenecks"),
+            self._build_structured_tool(self.detect_anomalies_with_model, "detect_anomalies_with_model"),
         ]
     
     # High-level semantic operations decorated with @tool

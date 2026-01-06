@@ -8,8 +8,10 @@ the common interface and shared functionality for log, trace, and metric analysi
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+import inspect
 
 from langchain.tools import tool
+from langchain_core.tools import StructuredTool
 
 
 class BaseRCATool(ABC):
@@ -49,12 +51,12 @@ class BaseRCATool(ABC):
         return self._initialized
     
     @abstractmethod
-    def get_tools(self) -> List[tool]:
+    def get_tools(self) -> List[Any]:
         """
         Get a list of LangChain tools provided by this RCA tool.
         
         Returns:
-            List of LangChain tool objects decorated with @tool
+            List of LangChain tool objects
         """
         pass
     
@@ -89,8 +91,46 @@ class BaseRCATool(ABC):
             
         return start_time, end_time
     
-    # Placeholder methods to be implemented by subclasses
-    # These will be filled in later based on specific requirements
+    def _build_structured_tool(self, func: Any, name: Optional[str] = None, description: Optional[str] = None) -> StructuredTool:
+        """
+        Wrap a bound method into a StructuredTool with propagated description.
+        
+        Description propagation order:
+        1) description argument (if provided)
+        2) func.description (if func is already a Tool)
+        3) func.__doc__ from subclass implementation
+        4) Base class method description (if Base method is a Tool)
+        5) Base class method docstring
+        """
+        method_name = name or getattr(func, "name", None) or func.__name__
+        
+        docstring = description
+        
+        # 1. Check func itself (child implementation or inherited tool)
+        if not docstring:
+            if hasattr(func, "description") and func.description:
+                docstring = func.description
+            elif hasattr(func, "__doc__") and func.__doc__:
+                docstring = func.__doc__
+        
+        # 2. Check parent if still no docstring
+        if not docstring:
+            try:
+                # Use super() to find parent implementation
+                parent_method = getattr(super(type(self), self), method_name, None)
+                if parent_method:
+                    if hasattr(parent_method, "description") and parent_method.description:
+                        docstring = parent_method.description
+                    elif hasattr(parent_method, "__doc__") and parent_method.__doc__:
+                        docstring = parent_method.__doc__
+            except Exception:
+                pass
+
+        return StructuredTool.from_function(
+            func=func,
+            name=method_name,
+            description=docstring.strip() if docstring else method_name
+        )
     
     def cleanup(self) -> None:
         """

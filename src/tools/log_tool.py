@@ -43,9 +43,9 @@ class LogAnalysisTool(BaseRCATool):
     def get_tools(self) -> List[Any]:
         """Get list of LangChain tools for log analysis."""
         return [
-            self.get_log_summary,
-            self.query_logs,
-            self.extract_log_templates_drain3,
+            self._build_structured_tool(self.get_log_summary, "get_log_summary"),
+            self._build_structured_tool(self.query_logs, "query_logs"),
+            self._build_structured_tool(self.extract_log_templates_drain3, "extract_log_templates_drain3"),
         ]
     
     @tool

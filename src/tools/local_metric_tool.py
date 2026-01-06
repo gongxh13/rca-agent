@@ -444,42 +444,6 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
         min_data_points_zscore: int = 5,
         min_consecutive: int = 3
     ) -> str:
-        """
-        Detect anomalies in core metrics using ruptures or Z-score methods.
-        
-        This is a robust tool that focuses on core metrics (CPU, memory, disk, network, JVM)
-        for candidate components and identifies anomalies with fault start times.
-        
-        Args:
-            start_time: Start time in ISO format
-            end_time: End time in ISO format
-            method: Detection method - "ruptures", "zscore", or "both" (default: "both")
-            component_id: Optional component ID to filter
-            sensitivity: Z-score threshold for anomaly detection (default: 3.0)
-            top: Maximum number of anomalies to return (default: 10)
-            ruptures_algorithm: Algorithm for ruptures - "pelt", "binseg", "dynp", "window" (default: "pelt")
-            ruptures_model: Model for ruptures - "rbf", "l1", "l2", "linear", "normal", "ar", "rank" (default: "rbf")
-            pen: Penalty parameter for ruptures (default: 5.0)
-            z_threshold: Z-score threshold (default: None, uses sensitivity if None)
-            min_data_points_ruptures: Minimum data points for ruptures (default: 10)
-            min_data_points_zscore: Minimum data points for z-score (default: 5)
-            min_consecutive: Minimum consecutive anomalies for z-score (default: 3)
-        
-        Ruptures Algorithms:
-            - "pelt": Pruned Exact Linear Time - Fast and accurate, good for most scenarios (default)
-            - "binseg": Binary Segmentation - Fast but may not find global optimum
-            - "dynp": Dynamic Programming - Global optimum but computationally expensive
-            - "window": Window-based - Good for online detection
-        
-        Ruptures Models:
-            - "rbf": Radial Basis Function - Good for non-linear patterns (default)
-            - "l1": L1 norm - Robust to outliers
-            - "l2": L2 norm - Standard least squares
-            - "linear": Linear model - For linear trends
-            - "normal": Normal distribution - For Gaussian data
-            - "ar": Auto-regressive - For time series with dependencies
-            - "rank": Rank-based - Non-parametric, robust
-        """
         self._check_loader()
         
         # 候选组件列表

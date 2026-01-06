@@ -42,14 +42,14 @@ class MetricAnalysisTool(BaseRCATool):
     def get_tools(self) -> List[Any]:
         """Get list of LangChain tools for metric analysis."""
         return [
-            self.find_slow_services,
-            self.find_low_success_rate_services,
-            self.detect_metric_anomalies,
-            self.get_available_components,
-            self.get_available_metrics,
-            self.compare_service_metrics,
-            self.compare_container_metrics,
-            self.get_metric_statistics,
+            self._build_structured_tool(self.find_slow_services, "find_slow_services"),
+            self._build_structured_tool(self.find_low_success_rate_services, "find_low_success_rate_services"),
+            self._build_structured_tool(self.detect_metric_anomalies, "detect_metric_anomalies"),
+            self._build_structured_tool(self.get_available_components, "get_available_components"),
+            self._build_structured_tool(self.get_available_metrics, "get_available_metrics"),
+            self._build_structured_tool(self.compare_service_metrics, "compare_service_metrics"),
+            self._build_structured_tool(self.compare_container_metrics, "compare_container_metrics"),
+            self._build_structured_tool(self.get_metric_statistics, "get_metric_statistics"),
         ]
     
     # Application Metrics Tools (service-level analysis)
