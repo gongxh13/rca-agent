@@ -42,7 +42,6 @@ class LocalLogAnalysisTool(LogAnalysisTool):
         end_time: Optional[str] = None,
         service_name: Optional[str] = None
     ) -> str:
-        """Get a high-level summary of log activity."""
         if not start_time or not end_time:
             return "Error: start_time and end_time are required"
             
@@ -200,21 +199,6 @@ class LocalLogAnalysisTool(LogAnalysisTool):
         pattern: Optional[str] = None,
         limit: int = 20
     ) -> str:
-        """Query and view raw log entries.
-        
-        This tool allows the model to view actual log content for detailed analysis.
-        Useful for investigating specific time periods or examining logs matching a pattern.
-        
-        Args:
-            start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS)
-            end_time: End time in ISO format
-            service_name: Optional filter by service name (cmdb_id)
-            pattern: Optional regex pattern to match in log content (case-insensitive)
-            limit: Maximum number of log entries to return (default: 20)
-            
-        Returns:
-            Formatted string containing raw log entries with timestamps and services
-        """
         if not start_time or not end_time:
             return "Error: start_time and end_time are required"
             

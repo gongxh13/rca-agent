@@ -83,17 +83,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         end_time: str,
         save_path: Optional[str] = None
     ) -> str:
-        """
-        Train anomaly detection model using trace data from the specified period.
-        
-        Args:
-            start_time: Start time for training data
-            end_time: End time for training data
-            save_path: Optional path to save the trained model
-            
-        Returns:
-            Status message
-        """
         if not self.loader:
             self.initialize()
             
@@ -160,17 +149,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         end_time: str,
         model_path: Optional[str] = None
     ) -> str:
-        """
-        Detect anomalies using the trained model (Isolation Forest).
-        
-        Args:
-            start_time: Analysis start time
-            end_time: Analysis end time
-            model_path: Optional path to load model from
-            
-        Returns:
-            Formatted string of anomalies
-        """
         if not self.loader:
             self.initialize()
             
@@ -272,7 +250,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         min_duration_ms: int = 1000,
         limit: int = 10
     ) -> str:
-        """Find the slowest spans in the specified time range."""
         if not start_time or not end_time:
             return "Error: start_time and end_time are required for local analysis"
             
@@ -309,7 +286,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         start_time: Optional[str] = None,
         end_time: Optional[str] = None
     ) -> str:
-        """Analyze the call chain for specific traces."""
         if not trace_id:
             return "Error: trace_id is required for local analysis"
             
@@ -411,7 +387,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         end_time: Optional[str] = None,
         service_name: Optional[str] = None
     ) -> str:
-        """Get service dependency graph from trace data."""
         if not start_time or not end_time:
             return "Error: start_time and end_time are required"
             
@@ -464,7 +439,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         service_name: Optional[str] = None,
         sensitivity: float = 0.8
     ) -> str:
-        """Detect anomalous latency patterns."""
         if not start_time or not end_time:
             return "Error: start_time and end_time are required"
             
@@ -522,7 +496,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         end_time: Optional[str] = None,
         min_impact_percentage: float = 10.0
     ) -> str:
-        """Identify performance bottlenecks."""
         if not start_time or not end_time:
             return "Error: start_time and end_time are required"
             

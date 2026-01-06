@@ -22,9 +22,6 @@ from ..tools.local_metric_tool import LocalMetricAnalysisTool
 from ..tools.local_trace_tool import LocalTraceAnalysisTool
 from .rca_config import (
     DEEP_AGENT_SYSTEM_PROMPT,
-    LOG_AGENT_PROMPT,
-    METRIC_AGENT_PROMPT,
-    TRACE_AGENT_PROMPT,
     METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT,
     ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT,
     EVALUATION_DECISION_AGENT_SYSTEM_PROMPT,
@@ -43,147 +40,17 @@ class EvaluationDecisionState(TypedDict, total=False):
     final_decision: Optional[str]
 
 
-def create_log_analysis_agent(
-    model: BaseChatModel,
-    config: Optional[Dict[str, Any]] = None
-):
-    """
-    Create a specialized log analysis agent.
-    
-    Args:
-        model: Language model to use for the agent
-        config: Configuration for the log analysis tool
-        
-    Returns:
-        Agent graph for log analysis
-    """
-    # Initialize log analysis tool
-    tool_config = config or TOOL_CONFIGS["log_analyzer"]
-    log_tool = LocalLogAnalysisTool(config=tool_config)
-    log_tool.initialize()
-    
-    # Get tools from the tool class
-    tools = log_tool.get_tools()
-    
-    # Add PythonREPLTool as fallback (LAST RESORT)
-    from langchain_experimental.tools import PythonREPLTool
-    python_repl = PythonREPLTool()
-    tools.append(python_repl)
-    
-    # Create agent using create_agent
-    agent_graph = create_agent(
-        model=model,
-        tools=tools,
-        system_prompt=LOG_AGENT_PROMPT
-    )
-    
-    return agent_graph
-
-
-def create_metric_analysis_agent(
-    model: BaseChatModel,
-    config: Optional[Dict[str, Any]] = None
-):
-    """
-    Create a specialized metric analysis agent.
-    
-    Args:
-        model: Language model to use for the agent
-        config: Configuration for the metric analysis tool
-        
-    Returns:
-        Agent graph for metric analysis
-    """
-    # Initialize metric analysis tool
-    tool_config = config or TOOL_CONFIGS["metric_analyzer"]
-    metric_tool = LocalMetricAnalysisTool(config=tool_config)
-    metric_tool.initialize()
-    
-    # Get tools from the tool class - these are the PRIMARY tools
-    tools = metric_tool.get_tools()
-    
-    # Add PythonREPLTool as fallback (LAST RESORT only)
-    # Only use when metric tools cannot fulfill the request
-    from langchain_experimental.tools import PythonREPLTool
-    python_repl = PythonREPLTool()
-    tools.append(python_repl)
-    
-    # Create agent using create_agent
-    agent_graph = create_agent(
-        model=model,
-        tools=tools,
-        system_prompt=METRIC_AGENT_PROMPT
-    )
-    
-    return agent_graph
-
-
-def create_trace_analysis_agent(
-    model: BaseChatModel,
-    config: Optional[Dict[str, Any]] = None
-):
-    """
-    Create a specialized trace analysis agent.
-    
-    Args:
-        model: Language model to use for the agent
-        config: Configuration for the trace analysis tool
-        
-    Returns:
-        Agent graph for trace analysis
-    """
-    # Initialize trace analysis tool
-    tool_config = config or TOOL_CONFIGS["trace_analyzer"]
-    trace_tool = LocalTraceAnalysisTool(config=tool_config)
-    trace_tool.initialize()
-    
-    # Get tools from the tool class
-    tools = trace_tool.get_tools()
-    
-    # Add PythonREPLTool as fallback (LAST RESORT)
-    from langchain_experimental.tools import PythonREPLTool
-    python_repl = PythonREPLTool()
-    tools.append(python_repl)
-    
-    # Create agent using create_agent
-    agent_graph = create_agent(
-        model=model,
-        tools=tools,
-        system_prompt=TRACE_AGENT_PROMPT
-    )
-    
-    return agent_graph
-
 def create_metric_fault_analyst_agent(
     model: BaseChatModel,
     config: Optional[Dict[str, Any]] = None
 ):
-    metric_agent = create_metric_analysis_agent(model, config)
-    subagents = [
-        CompiledSubAgent(
-            name="metric-analyzer",
-            description="Specialized agent for analyzing application performance and infrastructure metrics. Can analyze service performance, resource usage, detect metric anomalies, and assess component health.",
-            runnable=metric_agent
-        ),
-    ]
-
+    tool_config = (config or {}).get("metric_analyzer") or TOOL_CONFIGS["metric_analyzer"]
+    metric_tool = LocalMetricAnalysisTool(config=tool_config)
+    metric_tool.initialize()
+    tools = metric_tool.get_tools()
     middleware = [
         TodoListMiddleware(),
         AgentHistoryRecordingMiddleware(record_agent_name="metric_fault_analyst"),
-        SubAgentMiddleware(
-            default_model=model,
-            subagents=subagents if subagents is not None else [],
-            default_middleware=[
-                TodoListMiddleware(),
-                SummarizationMiddleware(
-                    model=model,
-                    max_tokens_before_summary=170000,
-                    messages_to_keep=6,
-                ),
-                PatchToolCallsMiddleware(),
-            ],
-            general_purpose_agent=True,
-        ),
         SummarizationMiddleware(
             model=model,
             max_tokens_before_summary=170000,
@@ -191,56 +58,27 @@ def create_metric_fault_analyst_agent(
         ),
         PatchToolCallsMiddleware(),
     ]
-
     return create_agent(
         model,
+        tools=tools,
         system_prompt=METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})
-    # # Create DeepAgent
-    # deep_agent = create_deep_agent(
-    #     model=model,
-    #     system_prompt=METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT,
-    #     subagents=subagents
-    # )
-    # return deep_agent
 
 def create_root_cause_localizer_agent(
     model: BaseChatModel,
     config: Optional[Dict[str, Any]] = None
 ):
-    log_agent = create_log_analysis_agent(model, config)
-    trace_agent = create_trace_analysis_agent(model, config)
-    subagents = [
-        CompiledSubAgent(
-            name="log-analyzer",
-            description="Specialized agent for analyzing application and system logs. Can find error patterns, detect anomalies, analyze error frequencies, and correlate log events.",
-            runnable=log_agent
-        ),
-        CompiledSubAgent(
-            name="trace-analyzer",
-            description="Specialized agent for analyzing distributed traces. Can find slow spans, analyze call chains, map service dependencies, detect latency anomalies, and identify bottlenecks.",
-            runnable=trace_agent
-        ),
-    ]
-
+    log_tool_config = (config or {}).get("log_analyzer") or TOOL_CONFIGS["log_analyzer"]
+    trace_tool_config = (config or {}).get("trace_analyzer") or TOOL_CONFIGS["trace_analyzer"]
+    log_tool = LocalLogAnalysisTool(config=log_tool_config)
+    trace_tool = LocalTraceAnalysisTool(config=trace_tool_config)
+    log_tool.initialize()
+    trace_tool.initialize()
+    tools = log_tool.get_tools() + trace_tool.get_tools()
     middleware = [
         TodoListMiddleware(),
         AgentHistoryRecordingMiddleware(record_agent_name="root_cause_localizer"),
-        SubAgentMiddleware(
-            default_model=model,
-            subagents=subagents if subagents is not None else [],
-            default_middleware=[
-                TodoListMiddleware(),
-                SummarizationMiddleware(
-                    model=model,
-                    max_tokens_before_summary=170000,
-                    messages_to_keep=6,
-                ),
-                PatchToolCallsMiddleware(),
-            ],
-            general_purpose_agent=True,
-        ),
         SummarizationMiddleware(
             model=model,
             max_tokens_before_summary=170000,
@@ -248,19 +86,12 @@ def create_root_cause_localizer_agent(
         ),
         PatchToolCallsMiddleware(),
     ]
-
     return create_agent(
         model,
-        system_prompt=ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
+        tools=tools,
+        system_prompt=ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})
-    # Create DeepAgent
-    # deep_agent = create_deep_agent(
-    #     model=model,
-    #     system_prompt=ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT,
-    #     subagents=subagents
-    # )
-    # return deep_agent
 
 def create_evaluation_sub_agent(
     model: BaseChatModel,
