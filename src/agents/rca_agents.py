@@ -25,7 +25,6 @@ from .rca_config import (
     LOG_AGENT_PROMPT,
     METRIC_AGENT_PROMPT,
     TRACE_AGENT_PROMPT,
-    DECISION_REFLECTION_AGENT_PROMPT,
     METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT,
     ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT,
     EVALUATION_DECISION_AGENT_SYSTEM_PROMPT,
@@ -65,8 +64,6 @@ def create_log_analysis_agent(
     
     # Get tools from the tool class
     tools = log_tool.get_tools()
-
-    tools = []
     
     # Add PythonREPLTool as fallback (LAST RESORT)
     from langchain_experimental.tools import PythonREPLTool
@@ -142,8 +139,6 @@ def create_trace_analysis_agent(
     
     # Get tools from the tool class
     tools = trace_tool.get_tools()
-
-    tools = []
     
     # Add PythonREPLTool as fallback (LAST RESORT)
     from langchain_experimental.tools import PythonREPLTool
@@ -158,19 +153,6 @@ def create_trace_analysis_agent(
     )
     
     return agent_graph
-
-
-def create_decision_reflection_agent(
-    model: BaseChatModel,
-    config: Optional[Dict[str, Any]] = None
-):
-    agent_graph = create_agent(
-        model=model,
-        tools=[],
-        system_prompt=DECISION_REFLECTION_AGENT_PROMPT
-    )
-    return agent_graph
-
 
 def create_metric_fault_analyst_agent(
     model: BaseChatModel,
@@ -465,9 +447,6 @@ def create_rca_deep_agent(
     if sub_agent_model is None:
         sub_agent_model = model
     
-    # Create sub-agents
-    decision_agent = create_decision_reflection_agent(sub_agent_model, config)
-
     # 1. 创建合并后的 Metric Fault Analyst
     metric_fault_analyst_agent = create_metric_fault_analyst_agent(sub_agent_model, config)
     

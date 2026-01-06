@@ -13,6 +13,9 @@ This version uses async streaming execution with multiple stream modes:
 
 import asyncio
 import dotenv
+import os
+from datetime import datetime
+import uuid
 
 dotenv.load_dotenv()
 
@@ -189,11 +192,18 @@ async def run_analysis(
         console.print(Rule("[bold green]分析结果[/bold green]", style="green"))
         console.print()
         
-        output = result.get("output", "No output")
-        if isinstance(output, str):
-            console.print(Panel(output, title="[bold green]最终结果[/bold green]", border_style="green"))
-        else:
-            console.print(Panel(str(output), title="[bold green]最终结果[/bold green]", border_style="green"))
+        output = result or "No output"
+        console.print(Panel(output, title="[bold green]最终结果[/bold green]", border_style="green"))
+        
+        save_dir = os.path.join(os.getcwd(), "outputs", "rca")
+        os.makedirs(save_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique = uuid.uuid4().hex[:6]
+        filename = f"rca_result_{ts}_{unique}.md"
+        save_path = os.path.join(save_dir, filename)
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(output if isinstance(output, str) else str(output))
+        console.print(f"[bold green]✓ 结果已保存至[/bold green] {save_path}")
         
     except Exception as e:
         console.print(f"[bold red]Error: {e}[/bold red]")

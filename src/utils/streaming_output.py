@@ -827,7 +827,7 @@ async def stream_agent_execution(
     stream_modes: List[str] = ["messages", "custom", "updates"],
     handler: Optional[StreamingOutputHandler] = None,
     _is_resume: bool = False  # 内部参数，表示是否是恢复执行
-) -> Dict[str, Any]:
+) -> str:
     """
     异步流式执行 agent，支持人机交互（Human-in-the-Loop）
     
@@ -840,7 +840,7 @@ async def stream_agent_execution(
         _is_resume: 内部参数，表示是否是恢复执行（递归调用时使用）
         
     Returns:
-        最终的执行结果
+        最后一条流式消息的内容（字符串）
     """
     if handler is None:
         handler = StreamingOutputHandler()
@@ -863,8 +863,6 @@ async def stream_agent_execution(
         handler.console.print()
         handler.console.print(Rule("[bold cyan]Agent Execution Started[/bold cyan]", style="cyan"))
         handler.console.print()
-    
-    final_result = None
     
     try:
         # 使用 astream 进行异步流式执行
@@ -1038,16 +1036,18 @@ async def stream_agent_execution(
         raise
     
     finally:
-        # 只有在正常结束（不是通过递归恢复执行）时才 finalize 和 cleanup
+        # 只有在正常结束（不是通过递归恢复执行）时才 finalize
         if not _is_resume:
-            # 完成所有流式输出
+            # 完成所有流式输出（停止 Live 显示，但保留数据）
             handler.finalize_all()
-            # 清理资源
-            handler.cleanup()
     
-    # 从流式输出中获取最后一条消息的内容作为最终结果
+    # 在 cleanup 之前获取最后一条消息的内容
+    # 这样可以确保数据还没有被清空
     last_message_content = handler.get_last_message_content()
-    if last_message_content:
-        final_result = {"output": last_message_content, "messages": []}
     
-    return final_result
+    # 清理资源（在获取完消息内容之后）
+    if not _is_resume:
+        handler.cleanup()
+    
+    # 返回最后一条消息的内容，如果没有则返回空字符串
+    return last_message_content or ""
