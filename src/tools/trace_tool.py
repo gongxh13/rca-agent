@@ -46,8 +46,8 @@ class TraceAnalysisTool(BaseRCATool):
             self.analyze_call_chain,
             self.get_service_dependencies,
             self.detect_latency_anomalies,
-            self.find_failed_traces,
             self.identify_bottlenecks,
+            self.detect_anomalies_with_model,
         ]
     
     # High-level semantic operations decorated with @tool
@@ -142,29 +142,6 @@ class TraceAnalysisTool(BaseRCATool):
             
         Returns:
             A formatted list of latency anomalies with affected operations and severity
-        """
-        raise NotImplementedError()
-    
-    @tool
-    def find_failed_traces(
-        self,
-        start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
-        service_name: Optional[str] = None,
-        limit: int = 10
-    ) -> str:
-        """Find traces that contain errors or failures.
-        
-        Identifies failed requests to help understand error patterns and failure modes.
-        
-        Args:
-            start_time: Start of time range in ISO format
-            end_time: End of time range in ISO format
-            service_name: Optional filter by service name
-            limit: Maximum number of failed traces to return (default: 10)
-            
-        Returns:
-            A formatted list of failed traces with error information and failure rates
         """
         raise NotImplementedError()
     

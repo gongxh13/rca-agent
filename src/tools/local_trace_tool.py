@@ -33,6 +33,15 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
         dataset_path = self.config.get("dataset_path", "datasets/OpenRCA/Bank")
         default_tz = self.config.get("default_timezone", "Asia/Shanghai")
         self.loader = OpenRCADataLoader(dataset_path, default_timezone=default_tz)
+        model_path = self.config.get("model_path", "artifacts/iforest/iforest_OpenRCA_Bank_2021-03-04.pkl")
+        if os.path.exists(model_path):
+            try:
+                with open(model_path, 'rb') as f:
+                    data = pickle.load(f)
+                    self.trace_detectors = data.get('detectors', {})
+                    self.normal_stats = data.get('stats', {})
+            except Exception:
+                pass
         
     def _slide_window(self, df: pd.DataFrame, win_size_ms: int = 30000) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -506,22 +515,6 @@ class LocalTraceAnalysisTool(TraceAnalysisTool):
             )
             
         return "\n".join(result)
-
-    def find_failed_traces(
-        self,
-        start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
-        service_name: Optional[str] = None,
-        limit: int = 10
-    ) -> str:
-        """Find traces that contain errors."""
-        # Note: The current dataset schema doesn't seem to have an error code or status column.
-        # We will return a message stating this limitation, but provide a hook for future extension.
-        return (
-            "Analysis of failed traces is currently limited as the dataset does not explicitly "
-            "indicate error status (e.g., HTTP status codes) in the trace spans. "
-            "Future versions may infer failures from missing spans or specific tag patterns."
-        )
 
     def identify_bottlenecks(
         self,

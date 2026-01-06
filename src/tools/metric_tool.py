@@ -42,7 +42,6 @@ class MetricAnalysisTool(BaseRCATool):
     def get_tools(self) -> List[Any]:
         """Get list of LangChain tools for metric analysis."""
         return [
-            self.get_service_performance,
             self.find_slow_services,
             self.find_low_success_rate_services,
             self.detect_metric_anomalies,
@@ -136,29 +135,6 @@ class MetricAnalysisTool(BaseRCATool):
         """
         raise NotImplementedError()
 
-    @tool
-    def get_service_performance(
-        self,
-        start_time: str,
-        end_time: str,
-        service_name: Optional[str] = None
-    ) -> str:
-        """Get performance metrics for services in a time range.
-        
-        Analyzes service-level metrics including response time, success rate,
-        and request volume to understand application performance.
-        
-        Args:
-            start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS)
-            end_time: End time in ISO format
-            service_name: Optional specific service to analyze (if None, analyzes all services)
-            
-        Returns:
-            Formatted summary of service performance including average response time,
-            success rate, request count, and identification of any concerning patterns
-        """
-        raise NotImplementedError()
-    
     @tool
     def find_slow_services(
         self,

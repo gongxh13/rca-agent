@@ -10,17 +10,10 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import json
-
 from .metric_tool import MetricAnalysisTool
 from .data_loader import OpenRCADataLoader
 from src.utils.time_utils import to_iso_shanghai
-
-try:
-    import ruptures as rpt
-    RUPTURES_AVAILABLE = True
-except ImportError:
-    RUPTURES_AVAILABLE = False
-
+import ruptures as rpt
 
 class LocalMetricAnalysisTool(MetricAnalysisTool):
     """
@@ -295,52 +288,6 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
         
         return json.dumps(result, indent=2)
 
-    # Application Metrics Tools
-    
-    def get_service_performance(
-        self,
-        start_time: str,
-        end_time: str,
-        service_name: Optional[str] = None
-    ) -> str:
-        self._check_loader()
-        df = self.data_loader.load_metrics_for_time_range(start_time, end_time, "app")
-        
-        if df.empty:
-            return f"No application metrics found between {start_time} and {end_time}"
-            
-        if service_name:
-            df = df[df['tc'] == service_name]
-            if df.empty:
-                return f"No metrics found for service '{service_name}' in the specified time range"
-        
-        # Calculate statistics
-        stats = df.groupby('tc').agg({
-            'mrt': ['mean', 'max', 'min'],
-            'sr': 'mean',
-            'rr': 'mean',
-            'cnt': 'sum'
-        }).round(2)
-        
-        # Format output
-        output = [f"Service Performance Summary ({start_time} to {end_time}):"]
-        
-        for service in stats.index:
-            s = stats.loc[service]
-            output.append(f"\nService: {service}")
-            output.append(f"  - Avg Response Time: {s[('mrt', 'mean')]}ms (Range: {s[('mrt', 'min')]}-{s[('mrt', 'max')]}ms)")
-            output.append(f"  - Success Rate: {s[('sr', 'mean')]}%")
-            output.append(f"  - Request Rate: {s[('rr', 'mean')]}%")
-            output.append(f"  - Total Requests: {int(s[('cnt', 'sum')])}")
-            
-            # Add insights
-            if s[('sr', 'mean')] < 99.0:
-                output.append(f"  ⚠️ Low success rate detected (<99%)")
-            if s[('mrt', 'mean')] > 500:
-                output.append(f"  ⚠️ High latency detected (>500ms)")
-                
-        return "\n".join(output)
-    
     def get_available_components(
         self,
         start_time: str,
@@ -718,29 +665,6 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
         if ruptures_model not in valid_models:
             ruptures_model = 'rbf'  # 默认使用 rbf
         
-        def get_threshold(kpi_name: str) -> float:
-            if 'CPU' in kpi_name or 'CPULoad' in kpi_name:
-                return 20.0
-            elif 'MEM' in kpi_name or 'Memory' in kpi_name or 'Heap_Usage' in kpi_name:
-                return 30.0
-            elif 'DSK' in kpi_name or 'disk' in kpi_name.lower():
-                return 50.0
-            elif 'NET' in kpi_name or 'Network' in kpi_name:
-                # 网络带宽利用率：80%以上需要关注
-                if 'BandwidthUtil' in kpi_name:
-                    return 80.0
-                # 网络错误：任何错误都需要关注
-                elif 'Err' in kpi_name:
-                    return 1.0
-                # TCP连接数：变化超过50%需要关注
-                elif 'TcpConnNum' in kpi_name or 'TCP-' in kpi_name:
-                    return 50.0
-                # 网络流量：变化超过50%需要关注
-                else:
-                    return 50.0
-            else:
-                return 30.0
-        
         def get_absolute_threshold(kpi_name: str) -> Optional[float]:
             """获取绝对阈值，用于检测持续高值（即使没有变化点）"""
             if 'MEM' in kpi_name or 'Memory' in kpi_name:
@@ -799,7 +723,7 @@ class LocalMetricAnalysisTool(MetricAnalysisTool):
         
         # 使用ruptures检测
         def detect_with_ruptures(component: str, kpi_name: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
-            if not RUPTURES_AVAILABLE or len(data) < min_data_points_ruptures:
+            if len(data) < min_data_points_ruptures:
                 return []
             
             data = data.sort_values('datetime').reset_index(drop=True)

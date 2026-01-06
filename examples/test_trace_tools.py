@@ -50,23 +50,23 @@ def test_traces():
     print("\n6. Testing anomaly model training and detection:")
 
     train_start = "2021-03-04T00:00:00"
-    train_end = "2021-03-04T01:00:00"
-    model_path = "tmp_trace_model.pkl"
+    train_end = "2021-03-04T23:59:59"
+    model_path = "artifacts/iforest/iforest_OpenRCA_Bank_2021-03-04.pkl"
     
     print(f"Training model on {train_start} to {train_end}...")
     print(tool.train_anomaly_model(train_start, train_end, save_path=model_path))
     
     # Detect on next 10 mins
-    detect_start = "2021-03-04T01:30:00"
-    detect_end = "2021-03-04T02:00:00"
+    detect_start = "2021-03-04T14:00:00"
+    detect_end = "2021-03-04T14:10:00"
     
     print(f"Detecting anomalies on {detect_start} to {detect_end}...")
     print(tool.detect_anomalies_with_model(detect_start, detect_end, model_path=model_path))
     
-    # Cleanup
-    if os.path.exists(model_path):
-        os.remove(model_path)
-        print(f"\nCleaned up temporary model file: {model_path}")
+    print("\n7. Testing auto-load on initialization:")
+    tool2 = LocalTraceAnalysisTool(config={"dataset_path": "datasets/OpenRCA/Bank", "model_path": model_path})
+    tool2.initialize()
+    print(tool2.detect_anomalies_with_model(detect_start, detect_end))
 
 if __name__ == "__main__":
     test_traces()
