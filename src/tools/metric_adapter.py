@@ -122,8 +122,10 @@ class OpenRCAMetricAdapter(MetricSemanticAdapter):
             return {"kind": "net.bytes", "unit": "bytes"}
         if 'JVM' in name and '_CPULoad' in name:
             return {"kind": "jvm.cpu.load", "unit": "ratio"}
-        if 'HeapMemoryMax' in name or 'HeapMemoryUsed' in name or 'JVM_Heap_Usage' in name:
+        if 'JVM_Heap_Usage' in name:
             return {"kind": "jvm.heap.usage", "unit": "ratio"}
+        if 'HeapMemoryMax' in name or 'HeapMemoryUsed' in name:
+            return None
         return None
 
     def get_absolute_threshold(self, metric_class: Optional[Dict[str, Any]]) -> Optional[float]:
