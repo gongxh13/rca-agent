@@ -17,15 +17,15 @@ from deepagents.middleware.subagents import CompiledSubAgent, SubAgent, SubAgent
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
-from ..tools.local_log_tool import LocalLogAnalysisTool
-from ..tools.local_metric_tool import LocalMetricAnalysisTool
-from ..tools.local_trace_tool import LocalTraceAnalysisTool
+from ..tools.log_tool import LogAnalysisTool
+from ..tools.metric_tool import MetricAnalysisTool
+from ..tools.trace_tool import TraceAnalysisTool
 from .rca_config import (
     DEEP_AGENT_SYSTEM_PROMPT,
-    METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT,
     ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT,
-    EVALUATION_DECISION_AGENT_SYSTEM_PROMPT,
-    EVALUATION_SUB_AGENT_SYSTEM_PROMPT,
+    get_metric_fault_analyst_prompt,
+    get_evaluation_decision_prompt,
+    get_evaluation_sub_agent_prompt,
     TOOL_CONFIGS
 )
 from .middleware import AgentHistoryRecordingMiddleware, AgentHistoryInjectionMiddleware, ExecutionHistory, SubAgentHistoryMergeMiddleware, AgentExecutionHistoryState
@@ -45,7 +45,7 @@ def create_metric_fault_analyst_agent(
     config: Optional[Dict[str, Any]] = None
 ):
     tool_config = (config or {}).get("metric_analyzer") or TOOL_CONFIGS["metric_analyzer"]
-    metric_tool = LocalMetricAnalysisTool(config=tool_config)
+    metric_tool = MetricAnalysisTool(config=tool_config)
     metric_tool.initialize()
     tools = metric_tool.get_tools()
     middleware = [
@@ -61,7 +61,7 @@ def create_metric_fault_analyst_agent(
     return create_agent(
         model,
         tools=tools,
-        system_prompt=METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
+        system_prompt=(get_metric_fault_analyst_prompt(config) + "\n\n" + BASE_AGENT_PROMPT) if get_metric_fault_analyst_prompt(config) else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})
 
@@ -71,8 +71,8 @@ def create_root_cause_localizer_agent(
 ):
     log_tool_config = (config or {}).get("log_analyzer") or TOOL_CONFIGS["log_analyzer"]
     trace_tool_config = (config or {}).get("trace_analyzer") or TOOL_CONFIGS["trace_analyzer"]
-    log_tool = LocalLogAnalysisTool(config=log_tool_config)
-    trace_tool = LocalTraceAnalysisTool(config=trace_tool_config)
+    log_tool = LogAnalysisTool(config=log_tool_config)
+    trace_tool = TraceAnalysisTool(config=trace_tool_config)
     log_tool.initialize()
     trace_tool.initialize()
     tools = log_tool.get_tools() + trace_tool.get_tools()
@@ -121,7 +121,7 @@ def create_evaluation_sub_agent(
     agent_graph = create_agent(
         model=model,
         tools=[],
-        system_prompt=EVALUATION_SUB_AGENT_SYSTEM_PROMPT,
+        system_prompt=get_evaluation_sub_agent_prompt(config),
         middleware=middleware
     )
     return agent_graph
@@ -156,7 +156,7 @@ def create_evaluation_decision_agent(
     decision_agent = create_agent(
                     model=model,
         tools=[],
-        system_prompt=EVALUATION_DECISION_AGENT_SYSTEM_PROMPT
+        system_prompt=get_evaluation_decision_prompt(config)
     )
     
     def create_evaluation_node(agent, agent_name: str):
@@ -290,13 +290,13 @@ def create_rca_deep_agent(
     # 4. 封装 SubAgents
     subagents = [
         CompiledSubAgent(
-            name="metric_fault_analyst",
+            name="metric_fault_analysis_agent",
             # 描述合并了 Step 1 和 Step 2
             description="Step 1 Agent: Responsible for Metric Analysis. It handles data preprocessing, threshold calculation, anomaly detection, AND noise filtering to identify confirmed faulty components.",
             runnable=metric_fault_analyst_agent
         ),
         CompiledSubAgent(
-            name="root_cause_localizer",
+            name="root_cause_localization_agent",
             # 现在的 Step 2
             description="Step 2 Agent: Responsible for Root Cause Localization using Traces and Logs based on the confirmed faults.",
             runnable=root_cause_localizer_agent

@@ -1,159 +1,139 @@
-"""
-Data Loader Utility
-
-Utility functions for loading OpenRCA dataset files (metrics, logs, traces).
-Handles file discovery, caching, and data preprocessing.
-"""
-
-import os
 import pandas as pd
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
+from abc import ABC, abstractmethod
+from src.utils.schema import (
+    COL_TIMESTAMP,
+    COL_ENTITY_ID,
+    COL_MESSAGE,
+    COL_SEVERITY,
+    COL_METRIC_NAME,
+    COL_VALUE,
+    COL_TRACE_ID,
+    COL_SPAN_ID,
+    COL_PARENT_SPAN_ID,
+    COL_DURATION_MS,
+    COL_STATUS_CODE,
+)
 
 
-class OpenRCADataLoader:
-    """
-    Loader for OpenRCA dataset files.
+class DataValidationError(Exception):
+    pass
+
+
+class BaseDataLoader(ABC):
+    def __init__(self, default_timezone: str = "Asia/Shanghai"):
+        self._tz = default_timezone
     
-    Handles loading metrics, logs, and traces from the OpenRCA dataset structure:
-    datasets/OpenRCA/{scenario}/telemetry/{date}/{type}/{file}.csv
-    """
+    def get_timezone(self) -> str:
+        return self._tz
     
-    def __init__(self, dataset_path: str, default_timezone: str = 'Asia/Shanghai'):
-        """
-        Initialize the data loader.
-        
-        Args:
-            dataset_path: Path to the OpenRCA dataset (e.g., "datasets/OpenRCA/Bank")
-        """
+    @abstractmethod
+    def load_metrics(self, start_time: str, end_time: str) -> pd.DataFrame:
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def load_logs(self, start_time: str, end_time: str) -> pd.DataFrame:
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def load_traces(self, start_time: str, end_time: str) -> pd.DataFrame:
+        raise NotImplementedError()
+
+    def validate_metrics_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE])
+        required = [COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE]
+        for col in required:
+            if col not in df.columns:
+                raise DataValidationError(f"metrics missing required column: {col}")
+        df = df.copy()
+        df[COL_TIMESTAMP] = pd.to_numeric(df[COL_TIMESTAMP], errors="coerce").astype("Int64")
+        df[COL_ENTITY_ID] = df[COL_ENTITY_ID].astype(str)
+        df[COL_METRIC_NAME] = df[COL_METRIC_NAME].astype(str)
+        df[COL_VALUE] = pd.to_numeric(df[COL_VALUE], errors="coerce").astype(float)
+        df = df.dropna(subset=[COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE])
+        return df[[COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE]]
+
+    def validate_logs_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE, COL_SEVERITY])
+        required = [COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE]
+        for col in required:
+            if col not in df.columns:
+                raise DataValidationError(f"logs missing required column: {col}")
+        df = df.copy()
+        df[COL_TIMESTAMP] = pd.to_numeric(df[COL_TIMESTAMP], errors="coerce").astype("Int64")
+        df[COL_ENTITY_ID] = df[COL_ENTITY_ID].astype(str)
+        df[COL_MESSAGE] = df[COL_MESSAGE].astype(str)
+        if COL_SEVERITY not in df.columns:
+            df[COL_SEVERITY] = None
+        df = df.dropna(subset=[COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE])
+        return df[[COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE, COL_SEVERITY]]
+
+    def validate_traces_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_TRACE_ID, COL_SPAN_ID, COL_PARENT_SPAN_ID, COL_DURATION_MS, COL_STATUS_CODE])
+        required = [COL_TIMESTAMP, COL_ENTITY_ID, COL_TRACE_ID, COL_SPAN_ID, COL_DURATION_MS]
+        for col in required:
+            if col not in df.columns:
+                raise DataValidationError(f"traces missing required column: {col}")
+        df = df.copy()
+        df[COL_TIMESTAMP] = pd.to_numeric(df[COL_TIMESTAMP], errors="coerce").astype("Int64")
+        df[COL_ENTITY_ID] = df[COL_ENTITY_ID].astype(str)
+        df[COL_TRACE_ID] = df[COL_TRACE_ID].astype(str)
+        df[COL_SPAN_ID] = df[COL_SPAN_ID].astype(str)
+        df[COL_PARENT_SPAN_ID] = df.get(COL_PARENT_SPAN_ID)
+        df[COL_DURATION_MS] = pd.to_numeric(df[COL_DURATION_MS], errors="coerce").astype(float)
+        if COL_STATUS_CODE not in df.columns:
+            df[COL_STATUS_CODE] = None
+        df = df.dropna(subset=[COL_TIMESTAMP, COL_ENTITY_ID, COL_TRACE_ID, COL_SPAN_ID, COL_DURATION_MS])
+        df = df[df[COL_DURATION_MS] >= 0]
+        return df[[COL_TIMESTAMP, COL_ENTITY_ID, COL_TRACE_ID, COL_SPAN_ID, COL_PARENT_SPAN_ID, COL_DURATION_MS, COL_STATUS_CODE]]
+
+
+    def get_metrics(self, start_time: str, end_time: str) -> pd.DataFrame:
+        df = self.load_metrics(start_time, end_time)
+        return self.validate_metrics_df(df)
+
+    def get_logs(self, start_time: str, end_time: str) -> pd.DataFrame:
+        df = self.load_logs(start_time, end_time)
+        return self.validate_logs_df(df)
+
+    def get_traces(self, start_time: str, end_time: str) -> pd.DataFrame:
+        df = self.load_traces(start_time, end_time)
+        return self.validate_traces_df(df)
+
+
+class OpenRCADataLoader(BaseDataLoader):
+    def __init__(self, dataset_path: str, default_timezone: str = "Asia/Shanghai"):
+        super().__init__(default_timezone=default_timezone)
         self.dataset_path = Path(dataset_path)
         self.telemetry_path = self.dataset_path / "telemetry"
         self._cache: Dict[str, pd.DataFrame] = {}
-        self._tz = default_timezone
-        
+
     def get_available_dates(self) -> List[str]:
-        """
-        Get list of available dates in the dataset.
-        
-        Returns:
-            List of date strings in YYYY_MM_DD format
-        """
         if not self.telemetry_path.exists():
             return []
-        
         dates = []
         for item in self.telemetry_path.iterdir():
-            if item.is_dir() and item.name.count('_') == 2:
+            if item.is_dir() and item.name.count("_") == 2:
                 dates.append(item.name)
         return sorted(dates)
-    
+
     def _date_to_path_format(self, date_str: str) -> str:
-        """
-        Convert ISO date string to path format.
-        
-        Args:
-            date_str: Date in ISO format (YYYY-MM-DD) or path format (YYYY_MM_DD)
-            
-        Returns:
-            Date in path format (YYYY_MM_DD)
-        """
-        if '_' in date_str:
+        if "_" in date_str:
             return date_str
-        return date_str.replace('-', '_')
-    
+        return date_str.replace("-", "_")
+
     def _get_file_path(self, date: str, data_type: str, filename: str) -> Optional[Path]:
-        """
-        Get the full path to a data file.
-        
-        Args:
-            date: Date string (YYYY-MM-DD or YYYY_MM_DD)
-            data_type: Type of data (metric, log, trace)
-            filename: Name of the file
-            
-        Returns:
-            Path to the file, or None if it doesn't exist
-        """
         date_formatted = self._date_to_path_format(date)
         file_path = self.telemetry_path / date_formatted / data_type / filename
-        
         if file_path.exists():
             return file_path
         return None
-    
-    def load_metric_app(self, date: str, use_cache: bool = True) -> Optional[pd.DataFrame]:
-        """
-        Load application metrics for a specific date.
-        
-        Args:
-            date: Date string (YYYY-MM-DD or YYYY_MM_DD)
-            use_cache: Whether to use cached data
-            
-        Returns:
-            DataFrame with columns: timestamp, rr, sr, cnt, mrt, tc
-        """
-        cache_key = f"metric_app_{date}"
-        
-        if use_cache and cache_key in self._cache:
-            return self._cache[cache_key]
-        
-        file_path = self._get_file_path(date, "metric", "metric_app.csv")
-        if not file_path:
-            return None
-        
-        df = pd.read_csv(file_path)
-        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True).dt.tz_convert(self._tz)
-        
-        if use_cache:
-            self._cache[cache_key] = df
-        
-        return df
-    
-    def load_metric_container(self, date: str, use_cache: bool = True) -> Optional[pd.DataFrame]:
-        """
-        Load container/infrastructure metrics for a specific date.
-        
-        Args:
-            date: Date string (YYYY-MM-DD or YYYY_MM_DD)
-            use_cache: Whether to use cached data
-            
-        Returns:
-            DataFrame with columns: timestamp, cmdb_id, kpi_name, value
-        """
-        cache_key = f"metric_container_{date}"
-        
-        if use_cache and cache_key in self._cache:
-            return self._cache[cache_key]
-        
-        file_path = self._get_file_path(date, "metric", "metric_container.csv")
-        if not file_path:
-            return None
-        
-        df = pd.read_csv(file_path)
-        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True).dt.tz_convert(self._tz)
-        
-        if use_cache:
-            self._cache[cache_key] = df
-        
-        return df
-    
-    def load_metrics_for_time_range(
-        self,
-        start_time: str,
-        end_time: str,
-        metric_type: str = "app"
-    ) -> pd.DataFrame:
-        """
-        Load metrics for a time range (may span multiple dates).
-        
-        Args:
-            start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS)
-            end_time: End time in ISO format
-            metric_type: Type of metrics ("app" or "container")
-            
-        Returns:
-            Combined DataFrame for the time range
-        """
+
+    def load_metrics(self, start_time: str, end_time: str) -> pd.DataFrame:
         start_dt = pd.to_datetime(start_time)
         end_dt = pd.to_datetime(end_time)
         if start_dt.tzinfo is None:
@@ -164,8 +144,6 @@ class OpenRCADataLoader:
             end_dt = end_dt.tz_localize(self._tz)
         else:
             end_dt = end_dt.tz_convert(self._tz)
-        
-        # Get all dates in range
         dates_to_load = []
         current_date = start_dt.date()
         while current_date <= end_dt.date():
@@ -173,217 +151,201 @@ class OpenRCADataLoader:
             dates_to_load.append(date_str)
             current_date = pd.Timestamp(current_date) + pd.Timedelta(days=1)
             current_date = current_date.date()
-        
-        # Load and combine data
-        dfs = []
+        app_dfs = []
+        cont_dfs = []
         for date in dates_to_load:
-            if metric_type == "app":
-                df = self.load_metric_app(date)
+            app_key = f"metric_app_{date}"
+            if app_key in self._cache:
+                app_df = self._cache[app_key]
             else:
-                df = self.load_metric_container(date)
-            
-            if df is not None:
-                dfs.append(df)
-        
-        if not dfs:
-            return pd.DataFrame()
-        
-        combined = pd.concat(dfs, ignore_index=True)
-        
-        # Filter to exact time range
-        combined = combined[
-            (combined['datetime'] >= start_dt) & 
-            (combined['datetime'] <= end_dt)
-        ]
-        
-        return combined
-    
-    def load_trace(self, date: str, use_cache: bool = True) -> Optional[pd.DataFrame]:
-        """
-        Load trace data for a specific date.
-        
-        Args:
-            date: Date string (YYYY-MM-DD or YYYY_MM_DD)
-            use_cache: Whether to use cached data
-            
-        Returns:
-            DataFrame with columns: timestamp, cmdb_id, parent_id, span_id, trace_id, duration
-        """
-        cache_key = f"trace_{date}"
-        
-        if use_cache and cache_key in self._cache:
-            return self._cache[cache_key]
-        
-        file_path = self._get_file_path(date, "trace", "trace_span.csv")
-        if not file_path:
-            return None
-        
-        # Traces can be large, so we might want to be careful here
-        # For now, load everything as requested
-        df = pd.read_csv(file_path)
-        df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True).dt.tz_convert(self._tz)
-        
-        if use_cache:
-            self._cache[cache_key] = df
-        
-        return df
+                app_path = self._get_file_path(date, "metric", "metric_app.csv")
+                app_df = pd.read_csv(app_path) if app_path else None
+                if app_df is not None:
+                    app_df[COL_TIMESTAMP] = (pd.to_numeric(app_df["timestamp"], errors="coerce") * 1000).astype("Int64")
+                    self._cache[app_key] = app_df
+            if app_df is not None:
+                app_dfs.append(app_df)
+            cont_key = f"metric_container_{date}"
+            if cont_key in self._cache:
+                cont_df = self._cache[cont_key]
+            else:
+                cont_path = self._get_file_path(date, "metric", "metric_container.csv")
+                cont_df = pd.read_csv(cont_path) if cont_path else None
+                if cont_df is not None:
+                    cont_df[COL_TIMESTAMP] = (pd.to_numeric(cont_df["timestamp"], errors="coerce") * 1000).astype("Int64")
+                    self._cache[cont_key] = cont_df
+            if cont_df is not None:
+                cont_dfs.append(cont_df)
+        app_df = pd.concat(app_dfs, ignore_index=True) if app_dfs else pd.DataFrame()
+        cont_df = pd.concat(cont_dfs, ignore_index=True) if cont_dfs else pd.DataFrame()
+        records = []
+        if not app_df.empty:
+            for _, row in app_df.iterrows():
+                svc = row.get("tc")
+                ts = row.get(COL_TIMESTAMP)
+                for col, kpi in [("mrt", "App_mrt"), ("sr", "App_sr"), ("rr", "App_rr"), ("cnt", "App_cnt")]:
+                    if col in app_df.columns:
+                        val = row.get(col)
+                        records.append(
+                            {
+                                COL_TIMESTAMP: ts,
+                                COL_ENTITY_ID: svc,
+                                COL_METRIC_NAME: kpi,
+                                COL_VALUE: val,
+                            }
+                        )
+        cont_norm = pd.DataFrame()
+        if not cont_df.empty:
+            if all(c in cont_df.columns for c in [COL_TIMESTAMP, "cmdb_id", "kpi_name", "value"]):
+                cont_norm = cont_df.rename(columns={"cmdb_id": COL_ENTITY_ID, "kpi_name": COL_METRIC_NAME})[
+                    [COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE]
+                ]
+            else:
+                cont_norm = pd.DataFrame()
+        app_norm = pd.DataFrame.from_records(records) if records else pd.DataFrame()
+        if not app_norm.empty:
+            start_ms = int(start_dt.timestamp() * 1000)
+            end_ms = int(end_dt.timestamp() * 1000)
+            app_norm = app_norm[(app_norm[COL_TIMESTAMP] >= start_ms) & (app_norm[COL_TIMESTAMP] <= end_ms)]
+        if not cont_norm.empty:
+            start_ms = int(start_dt.timestamp() * 1000)
+            end_ms = int(end_dt.timestamp() * 1000)
+            cont_norm = cont_norm[(cont_norm[COL_TIMESTAMP] >= start_ms) & (cont_norm[COL_TIMESTAMP] <= end_ms)]
+        if app_norm.empty and cont_norm.empty:
+            return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE])
 
-    def load_log(self, date: str, use_cache: bool = True) -> Optional[pd.DataFrame]:
-        """
-        Load log data for a specific date.
-        
-        Args:
-            date: Date string (YYYY-MM-DD or YYYY_MM_DD)
-            use_cache: Whether to use cached data
-            
-        Returns:
-            DataFrame with columns: log_id, timestamp, cmdb_id, log_name, value
-        """
-        cache_key = f"log_{date}"
-        
-        if use_cache and cache_key in self._cache:
-            return self._cache[cache_key]
-        
-        file_path = self._get_file_path(date, "log", "log_service.csv")
-        if not file_path:
-            return None
-        
-        # Logs can be very large, so we might want to be careful here
-        try:
-            df = pd.read_csv(file_path)
-            df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True).dt.tz_convert(self._tz)
-            
-            if use_cache:
-                self._cache[cache_key] = df
-            
-            return df
-        except Exception as e:
-            print(f"Error loading log file for {date}: {e}")
-            return None
-
-    def load_logs_for_time_range(
-        self,
-        start_time: str,
-        end_time: str
-    ) -> pd.DataFrame:
-        """
-        Load logs for a time range (may span multiple dates).
-        
-        Args:
-            start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS)
-            end_time: End time in ISO format
-            
-        Returns:
-            Combined DataFrame for the time range
-        """
-        start_dt = pd.to_datetime(start_time)
-        end_dt = pd.to_datetime(end_time)
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.tz_localize(self._tz)
+        if app_norm.empty:
+            merged = cont_norm
+        elif cont_norm.empty:
+            merged = app_norm
         else:
-            start_dt = start_dt.tz_convert(self._tz)
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.tz_localize(self._tz)
-        else:
-            end_dt = end_dt.tz_convert(self._tz)
-        
-        # Get all dates in range
-        dates_to_load = []
-        current_date = start_dt.date()
-        while current_date <= end_dt.date():
-            date_str = current_date.strftime("%Y_%m_%d")
-            dates_to_load.append(date_str)
-            current_date = pd.Timestamp(current_date) + pd.Timedelta(days=1)
-            current_date = current_date.date()
-        
-        # Load and combine data
-        dfs = []
-        for date in dates_to_load:
-            df = self.load_log(date)
-            if df is not None:
-                dfs.append(df)
-        
-        if not dfs:
-            return pd.DataFrame()
-        
-        combined = pd.concat(dfs, ignore_index=True)
-        
-        # Filter to exact time range
-        combined = combined[
-            (combined['datetime'] >= start_dt) & 
-            (combined['datetime'] <= end_dt)
-        ]
-        
-        return combined
-
-    def load_traces_for_time_range(
-        self,
-        start_time: str,
-        end_time: str
-    ) -> pd.DataFrame:
-        """
-        Load traces for a time range (may span multiple dates).
-        
-        Args:
-            start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS)
-            end_time: End time in ISO format
-            
-        Returns:
-            Combined DataFrame for the time range
-        """
-        start_dt = pd.to_datetime(start_time)
-        end_dt = pd.to_datetime(end_time)
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.tz_localize(self._tz)
-        else:
-            start_dt = start_dt.tz_convert(self._tz)
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.tz_localize(self._tz)
-        else:
-            end_dt = end_dt.tz_convert(self._tz)
-        
-        # Get all dates in range
-        dates_to_load = []
-        current_date = start_dt.date()
-        while current_date <= end_dt.date():
-            date_str = current_date.strftime("%Y_%m_%d")
-            dates_to_load.append(date_str)
-            current_date = pd.Timestamp(current_date) + pd.Timedelta(days=1)
-            current_date = current_date.date()
-        
-        # Load and combine data
-        dfs = []
-        for date in dates_to_load:
-            df = self.load_trace(date)
-            if df is not None:
-                dfs.append(df)
-        
-        if not dfs:
-            return pd.DataFrame()
-        
-        combined = pd.concat(dfs, ignore_index=True)
-        
-        # Filter to exact time range
-        combined = combined[
-            (combined['datetime'] >= start_dt) & 
-            (combined['datetime'] <= end_dt)
-        ]
-        
-        return combined
+            merged = pd.concat([cont_norm, app_norm], ignore_index=True)
+        return merged
 
     def clear_cache(self):
-        """Clear the data cache."""
         self._cache.clear()
-    
+
     def get_cache_info(self) -> Dict[str, Any]:
-        """
-        Get information about cached data.
-        
-        Returns:
-            Dictionary with cache statistics
-        """
         return {
             "cached_files": len(self._cache),
             "cache_keys": list(self._cache.keys()),
-            "total_rows": sum(len(df) for df in self._cache.values())
+            "total_rows": sum(len(df) for df in self._cache.values()),
         }
+
+    def load_logs(self, start_time: str, end_time: str) -> pd.DataFrame:
+        start_dt = pd.to_datetime(start_time)
+        end_dt = pd.to_datetime(end_time)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.tz_localize(self._tz)
+        else:
+            start_dt = start_dt.tz_convert(self._tz)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.tz_localize(self._tz)
+        else:
+            end_dt = end_dt.tz_convert(self._tz)
+        dates_to_load = []
+        current_date = start_dt.date()
+        while current_date <= end_dt.date():
+            date_str = current_date.strftime("%Y_%m_%d")
+            dates_to_load.append(date_str)
+            current_date = pd.Timestamp(current_date) + pd.Timedelta(days=1)
+            current_date = current_date.date()
+        dfs = []
+        for date in dates_to_load:
+            key = f"log_{date}"
+            if key in self._cache:
+                df = self._cache[key]
+            else:
+                path = self._get_file_path(date, "log", "log_service.csv")
+                df = None
+                if path:
+                    try:
+                        df = pd.read_csv(path)
+                        df[COL_TIMESTAMP] = (pd.to_numeric(df["timestamp"], errors="coerce") * 1000).astype("Int64")
+                        self._cache[key] = df
+                    except Exception:
+                        df = None
+            if df is not None:
+                dfs.append(df)
+        if not dfs:
+            return pd.DataFrame()
+        combined = pd.concat(dfs, ignore_index=True)
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(end_dt.timestamp() * 1000)
+        if COL_TIMESTAMP in combined.columns:
+            combined = combined[(combined[COL_TIMESTAMP] >= start_ms) & (combined[COL_TIMESTAMP] <= end_ms)]
+        if not combined.empty and all(c in combined.columns for c in [COL_TIMESTAMP, "cmdb_id", "value"]):
+            combined = combined.rename(columns={"cmdb_id": COL_ENTITY_ID, "value": COL_MESSAGE})
+        if COL_SEVERITY not in combined.columns:
+            combined[COL_SEVERITY] = None
+        keep = [COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE, COL_SEVERITY]
+        return combined[keep] if all(c in combined.columns for c in keep) else pd.DataFrame()
+
+
+    def load_traces(self, start_time: str, end_time: str) -> pd.DataFrame:
+        start_dt = pd.to_datetime(start_time)
+        end_dt = pd.to_datetime(end_time)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.tz_localize(self._tz)
+        else:
+            start_dt = start_dt.tz_convert(self._tz)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.tz_localize(self._tz)
+        else:
+            end_dt = end_dt.tz_convert(self._tz)
+        dates_to_load = []
+        current_date = start_dt.date()
+        while current_date <= end_dt.date():
+            date_str = current_date.strftime("%Y_%m_%d")
+            dates_to_load.append(date_str)
+            current_date = pd.Timestamp(current_date) + pd.Timedelta(days=1)
+            current_date = current_date.date()
+        dfs = []
+        for date in dates_to_load:
+            key = f"trace_{date}"
+            if key in self._cache:
+                df = self._cache[key]
+            else:
+                path = self._get_file_path(date, "trace", "trace_span.csv")
+                df = pd.read_csv(path) if path else None
+                if df is not None:
+                    df[COL_TIMESTAMP] = pd.to_numeric(df["timestamp"], errors="coerce").astype("Int64")
+                    self._cache[key] = df
+            if df is not None:
+                dfs.append(df)
+        if not dfs:
+            return pd.DataFrame()
+        combined = pd.concat(dfs, ignore_index=True)
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(end_dt.timestamp() * 1000)
+        if COL_TIMESTAMP in combined.columns:
+            combined = combined[(combined[COL_TIMESTAMP] >= start_ms) & (combined[COL_TIMESTAMP] <= end_ms)]
+        if not combined.empty:
+            rename_map = {"cmdb_id": "entity_id", "parent_id": "parent_span_id", "duration": "duration_ms"}
+            for k, v in rename_map.items():
+                if k in combined.columns:
+                    combined[v] = combined[k]
+        
+        if COL_STATUS_CODE not in combined.columns:
+            combined[COL_STATUS_CODE] = None
+            
+        keep = [COL_TIMESTAMP, COL_ENTITY_ID, COL_TRACE_ID, COL_SPAN_ID, COL_PARENT_SPAN_ID, COL_DURATION_MS, COL_STATUS_CODE]
+        return combined[keep] if all(c in combined.columns for c in keep) else pd.DataFrame()
+
+
+_LOADER_REGISTRY: Dict[str, Callable[..., BaseDataLoader]] = {}
+
+def register_data_loader(name: str, constructor: Callable[..., BaseDataLoader]) -> None:
+    _LOADER_REGISTRY[name.lower()] = constructor
+
+def create_data_loader(config: Optional[Dict[str, Any]] = None) -> BaseDataLoader:
+    cfg = config or {}
+    name = str(cfg.get("dataloader", "openrca")).lower()
+    default_tz = cfg.get("default_timezone", "Asia/Shanghai")
+    dataset_path = cfg.get("dataset_path", "datasets/OpenRCA/Bank")
+    if name not in _LOADER_REGISTRY:
+        name = "openrca"
+    constructor = _LOADER_REGISTRY[name]
+    return constructor(dataset_path, default_timezone=default_tz)
+
+register_data_loader("openrca", lambda dataset_path, default_timezone="Asia/Shanghai": OpenRCADataLoader(dataset_path, default_timezone=default_timezone))

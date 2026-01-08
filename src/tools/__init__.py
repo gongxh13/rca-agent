@@ -10,14 +10,13 @@ from .base import BaseRCATool
 from .log_tool import LogAnalysisTool
 from .trace_tool import TraceAnalysisTool
 from .metric_tool import MetricAnalysisTool
-from .local_metric_tool import LocalMetricAnalysisTool
-from .data_loader import OpenRCADataLoader
+from .data_loader import OpenRCADataLoader, BaseDataLoader
 
 __all__ = [
     "BaseRCATool",
     "LogAnalysisTool",
     "TraceAnalysisTool",
     "MetricAnalysisTool",
-    "LocalMetricAnalysisTool",
+    "BaseDataLoader",
     "OpenRCADataLoader",
 ]

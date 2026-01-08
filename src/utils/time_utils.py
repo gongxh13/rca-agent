@@ -1,26 +1,32 @@
 from typing import Any
-
 import pandas as pd
+import numpy as np
 
 
 def to_iso_shanghai(ts: Any) -> str:
-    """
-    将时间戳统一格式化为带 Asia/Shanghai 时区的 ISO 8601 字符串。
-
-    - 输入可以是 pd.Timestamp、numpy datetime64 或其他可被 pd.Timestamp 解析的类型。
-    - 如果没有时区信息，则假定为 Asia/Shanghai 并本地化。
-    - 如果有其他时区信息，则统一转换为 Asia/Shanghai。
-    """
+    if isinstance(ts, (int, np.integer, float)):
+        dt = pd.to_datetime(ts, unit="ms", utc=True).tz_convert("Asia/Shanghai")
+        return dt.isoformat()
     if isinstance(ts, pd.Timestamp):
         timestamp = ts
     else:
         timestamp = pd.Timestamp(ts)
-
     if timestamp.tzinfo is None:
         timestamp = timestamp.tz_localize("Asia/Shanghai")
     else:
         timestamp = timestamp.tz_convert("Asia/Shanghai")
-
     return timestamp.isoformat()
 
-
+def to_iso_with_tz(ts: Any, tz: str) -> str:
+    if isinstance(ts, (int, np.integer, float)):
+        dt = pd.to_datetime(ts, unit="ms", utc=True).tz_convert(tz)
+        return dt.isoformat()
+    if isinstance(ts, pd.Timestamp):
+        timestamp = ts
+    else:
+        timestamp = pd.Timestamp(ts)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(tz)
+    else:
+        timestamp = timestamp.tz_convert(tz)
+    return timestamp.isoformat()

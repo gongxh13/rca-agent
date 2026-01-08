@@ -8,11 +8,8 @@ the common interface and shared functionality for log, trace, and metric analysi
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-import inspect
-
-from langchain.tools import tool
-from langchain_core.tools import StructuredTool
-
+from langchain_core.tools import StructuredTool, tool as make_tool
+import functools
 
 class BaseRCATool(ABC):
     """
@@ -91,47 +88,6 @@ class BaseRCATool(ABC):
             
         return start_time, end_time
     
-    def _build_structured_tool(self, func: Any, name: Optional[str] = None, description: Optional[str] = None) -> StructuredTool:
-        """
-        Wrap a bound method into a StructuredTool with propagated description.
-        
-        Description propagation order:
-        1) description argument (if provided)
-        2) func.description (if func is already a Tool)
-        3) func.__doc__ from subclass implementation
-        4) Base class method description (if Base method is a Tool)
-        5) Base class method docstring
-        """
-        method_name = name or getattr(func, "name", None) or func.__name__
-        
-        docstring = description
-        
-        # 1. Check func itself (child implementation or inherited tool)
-        if not docstring:
-            if hasattr(func, "description") and func.description:
-                docstring = func.description
-            elif hasattr(func, "__doc__") and func.__doc__:
-                docstring = func.__doc__
-        
-        # 2. Check parent if still no docstring
-        if not docstring:
-            try:
-                # Use super() to find parent implementation
-                parent_method = getattr(super(type(self), self), method_name, None)
-                if parent_method:
-                    if hasattr(parent_method, "description") and parent_method.description:
-                        docstring = parent_method.description
-                    elif hasattr(parent_method, "__doc__") and parent_method.__doc__:
-                        docstring = parent_method.__doc__
-            except Exception:
-                pass
-
-        return StructuredTool.from_function(
-            func=func,
-            name=method_name,
-            description=docstring.strip() if docstring else method_name
-        )
-    
     def cleanup(self) -> None:
         """
         Clean up resources and close connections.
@@ -139,3 +95,16 @@ class BaseRCATool(ABC):
         Subclasses should override this to perform cleanup tasks.
         """
         self._initialized = False
+
+    def create_tool_description(self, f):
+        tool = make_tool(f, parse_docstring=True)
+        return dict(description=tool.description, args_schema=tool.args_schema)
+
+    def wrap(self, tool_obj):
+        func = getattr(tool_obj, "func", None)
+        name = getattr(tool_obj, "name", None) or (hasattr(tool_obj, "__name__") and tool_obj.__name__) or "tool"
+        desc = getattr(tool_obj, "description", None) or (getattr(func, "__doc__", None) if func else None) or name
+        if func is not None:
+            bound = functools.partial(func, self)
+            return StructuredTool.from_function(func=bound, name=name, description=desc)
+        return tool_obj

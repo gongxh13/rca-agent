@@ -1,379 +1,271 @@
-# RCA Agent System
+# RCA Agent（根因分析智能体）
 
-A DeepAgent-based root cause analysis system for distributed systems using specialized sub-agents for log, metric, and trace analysis.
+RCA Agent 是一个面向分布式系统的自动化根因分析系统，结合指标（Metrics）、调用链（Traces）、日志（Logs）三类数据源，采用多智能体协同和可迭代评估决策流程，定位故障组件、故障发生时间与根因解释。项目同时提供因果图（Causal Graph）与结构化因果模型（SCM）管线，以及 CPU 火焰图分析能力。
 
-## Architecture
+## 核心能力
+- 多智能体协同：指标故障分析、根因定位、评估决策三个子代理由协调器串联、支持迭代优化
+- 数据工具集成：本地 OpenRCA 数据集的指标、日志、调用链分析工具
+- 因果分析管线：数据预处理 → 因果图构建与优化 → SCM 训练 → 根因推断
+- 交互式流式分析：命令行交互、实时输出、可选接入 Langfuse 追踪
+- CPU 火焰图：可选采集与分析，辅助定位性能瓶颈
 
-The system consists of:
+## 数据集准备
+- 默认使用 OpenRCA Bank 场景数据，路径为 datasets/OpenRCA/Bank
+- 将数据集放到上述路径即可，无需额外代码配置
+- 示例目录结构：
 
-- **DeepAgent (Coordinator)**: Guides the RCA investigation without directly accessing data
-- **Log Analysis Agent**: Analyzes application and system logs
-- **Metric Analysis Agent**: Analyzes application performance and infrastructure metrics  
-- **Trace Analysis Agent**: Analyzes distributed traces
+```text
+datasets/
+└── OpenRCA/
+    └── Bank/
+        └── telemetry/
+            └── 2021_03_04/
+                ├── metric/
+                │   ├── metric_app.csv
+                │   └── metric_container.csv
+                ├── log/
+                │   └── log_service.csv
+                └── trace/
+                    └── trace_span.csv
+```
 
-## Installation
-
-1. Install dependencies:
+## 安装与环境
+- Python 版本：>= 3.11, < 3.14（见 [pyproject.toml](file:///Users/xuhonggong/Desktop/files/project/huawei/RCAAgent/pyproject.toml)）
+- 依赖管理：Poetry（推荐）
+  - 安装依赖：在项目根目录执行
 
 ```bash
-pip install -e .
+poetry install
 ```
 
-Or install specific dependencies:
+- 运行示例脚本时使用 Poetry
 
 ```bash
-pip install langchain langchain-core langchain-anthropic deepagents pandas networkx
+poetry run python examples/example_rca_scenario.py
 ```
 
-2. Set up your API key for the LLM provider (e.g., Anthropic):
+## 快速开始（交互式 RCA）
+- 运行交互式 RCA 场景分析（流式输出）
 
 ```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
+poetry run python examples/example_rca_scenario.py
 ```
 
-## Usage
+- 按提示输入时间范围与故障数量；系统将：
+  - 指标故障分析：识别异常组件与故障开始时间
+  - 根因定位：结合日志/调用链补证并产出根因解释
+  - 评估决策：并行多评估代理综合判定，必要时迭代优化
+- 结果会保存到 outputs/rca
 
-### Basic Usage
-
-```python
-from langchain_anthropic import ChatAnthropic
-from src.agents.rca_agents import create_rca_deep_agent
-
-# Initialize the model
-model = ChatAnthropic(
-    model="claude-sonnet-4-20250514",
-    temperature=0
-)
-
-# Create the RCA agent
-rca_agent = create_rca_deep_agent(
-    model=model,
-    config={"dataset_path": "datasets/OpenRCA/Bank"}
-)
-
-# Ask a question (in UTC+8 timezone)
-question = """
-在2021年3月4日下午14:00到15:00之间（东8区时间），系统性能下降。
-请帮我分析根本原因。
-
-Translation: Between 14:00 and 15:00 on March 4, 2021 (UTC+8), 
-system performance degraded. Please help analyze the root cause.
-"""
-
-# Run the investigation
-result = rca_agent.invoke({"input": question})
-print(result["output"])
-```
-
-### Running Examples
-
-1. **Basic Test**:
-```bash
-python examples/test_rca_agent.py
-```
-
-2. **Multiple Scenarios**:
-```bash
-python examples/example_rca_scenario.py
-```
-
-3. **Flamegraph Analysis**:
-```bash
-python examples/example_flamegraph_analysis.py
-```
-
-## How It Works
-
-### Investigation Workflow
-
-1. **Problem Understanding**: Extract time range, affected services, and symptoms
-2. **Initial Assessment**: Get high-level summaries from all sub-agents
-3. **Hypothesis Formation**: Form hypotheses about potential root causes
-4. **Targeted Investigation**: Direct sub-agents to investigate specific hypotheses
-5. **Correlation Analysis**: Look for temporal correlations across data sources
-6. **Root Cause Determination**: Synthesize findings and identify root cause
-7. **Recommendations**: Provide actionable recommendations
-
-### Timezone Handling
-
-- User questions contain times in **UTC+8** (China Standard Time)
-- The system automatically converts to ISO format for tool calls
-- CSV data contains Unix timestamps (handled by tools)
-- Results are presented with UTC+8 context for clarity
-
-### Sub-Agent Capabilities
-
-**Log Analysis Agent**:
-- Find error patterns
-- Detect log volume anomalies
-- Analyze error frequency
-- Find correlated events
-- Query raw logs
-
-**Metric Analysis Agent**:
-- Analyze service performance
-- Find slow services
-- Detect resource usage anomalies
-- Monitor component health
-- Compare performance across time periods
-
-**Trace Analysis Agent**:
-- Find slow spans
-- Analyze call chains
-- Map service dependencies
-- Detect latency anomalies
-- Identify bottlenecks
-
-**Flamegraph Analysis Agent**:
-- Real-time CPU profiling with py-spy or perf
-- Interactive flamegraph collection and analysis
-- Automatic bottleneck identification
-- Hierarchical function call analysis
-- Performance optimization recommendations
-
-## Example Scenarios
-
-The system can handle various RCA scenarios:
-
-1. **Latency Spikes**: Identify services with sudden response time increases
-2. **Error Spikes**: Analyze sudden increases in error logs
-3. **Resource Exhaustion**: Detect CPU, memory, or disk issues
-4. **Cascading Failures**: Trace failure propagation through service dependencies
-5. **CPU Performance Bottlenecks**: Analyze CPU flamegraphs to identify hot functions and optimization opportunities
-
-## Flamegraph Analysis
-
-The system provides comprehensive CPU flamegraph analysis capabilities for identifying performance bottlenecks in Python applications.
-
-### Features
-
-- **Real-time Profiling**: Collect CPU flamegraphs from running Python processes
-- **Interactive Collection**: User-friendly interface for selecting processes and configuring collection parameters
-- **AI-Powered Analysis**: Automatic identification of performance bottlenecks using LLM agents
-- **Hierarchical View**: Analyze function call hierarchies and CPU usage distribution
-- **Drill-down Analysis**: Deep dive into specific functions to understand their call chains
-
-### Prerequisites
-
-1. **Install py-spy** (for Python profiling):
-```bash
-pip install py-spy
-```
-
-2. **macOS Users**: py-spy requires root permissions to profile other processes. See [Troubleshooting](#troubleshooting) for details.
-
-### Quick Start
-
-#### 1. Start a Test Application
-
-Use the provided simulation script to create a CPU-intensive workload:
+## 非交互脚本
+- 因果管线（推荐用于离线训练 + 推断）：
+  - 预处理数据
 
 ```bash
-# Run for 5 minutes (default)
-python examples/simulate_cpu_bottleneck.py
-
-# Or specify custom duration (e.g., 60 seconds)
-python examples/simulate_cpu_bottleneck.py --duration 60
+poetry run python examples/prepare_causal_data.py
 ```
 
-#### 2. Collect Flamegraph
-
-Run the interactive flamegraph analysis tool:
+  - 构建并优化因果图（可选算法：pc/pcmci/granger/varlingam/granger_pc）
 
 ```bash
-python examples/example_flamegraph_analysis.py
+poetry run python examples/build_causal_graph.py
 ```
 
-The tool will guide you through:
-- **Collection Mode**: Choose between analyzing existing files or collecting new flamegraphs
-- **Process Selection**: Select the target Python process from a list
-- **Collection Parameters**:
-  - Output directory (default: `/tmp`)
-  - Sampling rate (50-500 Hz, default: 100 Hz)
-  - Collection mode (timed or manual stop)
-  - Duration (if using timed mode)
-
-#### 3. Analyze Flamegraph
-
-After collection, the tool will:
-- Automatically parse the SVG flamegraph
-- Extract function-level performance data
-- Provide AI-powered analysis of bottlenecks
-- Answer questions about CPU usage patterns
-
-### Collection Modes
-
-#### Python Profiling (py-spy)
-
-- **Use Case**: Profile Python applications
-- **Requirements**: 
-  - py-spy installed (`pip install py-spy`)
-  - Root permissions on macOS (for profiling other processes)
-- **Features**:
-  - Low overhead sampling
-  - Python-specific optimizations
-  - Automatic SVG generation
-
-#### Perf Profiling (Linux)
-
-- **Use Case**: System-level profiling of any process
-- **Requirements**: 
-  - `perf` tool installed (usually pre-installed on Linux)
-  - Root permissions
-- **Features**:
-  - System-wide profiling
-  - Kernel and user-space analysis
-  - Requires `flamegraph` tool for SVG generation
-
-### Analysis Capabilities
-
-The flamegraph analysis agent can:
-
-1. **Overview Analysis**: Get a hierarchical view of CPU usage by function level
-   - Identify top CPU-consuming functions
-   - Understand call stack distribution
-   - Find performance hotspots
-
-2. **Drill-down Analysis**: Deep dive into specific functions
-   - Analyze function call chains
-   - Identify sub-functions contributing to CPU usage
-   - Support exact and fuzzy matching
-
-3. **Question Answering**: Ask natural language questions such as:
-   - "What are the top CPU-consuming functions?"
-   - "Why is function X slow?"
-   - "What functions call Y and consume the most CPU?"
-   - "How can I optimize this code?"
-
-### Example Workflow
+  - 训练 SCM 模型
 
 ```bash
-# Terminal 1: Start the test application
-python examples/simulate_cpu_bottleneck.py --duration 300
-
-# Terminal 2: Collect and analyze flamegraph
-python examples/example_flamegraph_analysis.py
-
-# Follow the interactive prompts:
-# 1. Select "采集新文件" (Collect new file)
-# 2. Choose "Python" profiling type
-# 3. Select the simulate_cpu_bottleneck.py process
-# 4. Configure collection parameters
-# 5. Wait for collection to complete
-# 6. Ask questions about the flamegraph
+poetry run python examples/train_causal_model.py
 ```
 
-### Troubleshooting
+  - 基于 SCM 进行根因分析
 
-#### macOS Permission Issues
-
-On macOS, py-spy requires root permissions to profile other processes. The tool automatically detects this and provides solutions:
-
-**Option 1: Use sudo with environment preservation (Recommended for conda)**
 ```bash
-sudo -E python examples/example_flamegraph_analysis.py
+poetry run python examples/run_root_cause_analysis.py
 ```
 
-**Option 2: Preserve PATH environment variable**
-```bash
-sudo env PATH=$PATH python examples/example_flamegraph_analysis.py
-```
+## 标准数据格式（RCA 通用 Schema）
+- 目标：在兼容 OpenRCA 的基础上，提供通用、可扩展的数据结构，统一三类数据（metric/trace/log）的字段与类型，并在数据加载层强制校验与规范化；遇到不合法数据将抛出异常。
+- 适用：所有工具均基于统一 Schema；数据加载基类在返回数据前执行必填项与类型校验。不进行任何数据集兼容性转换；数据集特有字段映射由具体 DataLoader 子类负责（OpenRCADataLoader 完成 OpenRCA → 通用字段的转换）。
 
-**Option 3: Profile current process**
-- Don't specify a PID when prompted
-- The tool will profile itself (useful for testing)
+### Metric（统一字段）
+| 字段名 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| timestamp | Int64 | 是 | 毫秒时间戳（统一过滤依据） |
+| entity_id | str | 是 | 资源/组件标识 |
+| metric_name | str | 是 | 指标名称 |
+| value | float | 是 | 指标数值 |
+说明：时间展示通过工具层按 DataLoader 时区格式化。
 
-#### Process Not Found Errors
+### Log（统一字段）
+| 字段名 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| timestamp | Int64 | 是 | 毫秒时间戳（统一过滤依据） |
+| entity_id | str | 是 | 服务/组件名称 |
+| message | str | 是 | 原始日志文本 |
+| severity | Optional[str] | 否 | 日志等级（可选） |
+说明：只保留单一时间戳列；需要可读时间时在工具层按 DataLoader 时区格式化。
 
-If you see "Failed to find python version from target process":
-- Ensure the target process is a Python process
-- Verify the process is still running
-- Check that you have sufficient permissions
-- Try profiling the current process instead
+### Trace（统一字段）
+| 字段名 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| timestamp | Int64 | 是 | 毫秒时间戳（span开始时间） |
+| entity_id | str | 是 | 服务/组件名称 |
+| trace_id | str | 是 | Trace 唯一标识 |
+| span_id | str | 是 | Span 唯一标识 |
+| parent_span_id | Optional[str] | 否 | 父 Span 标识 |
+| duration_ms | float | 是 | Span 持续时间（毫秒，非负） |
+| status_code | Optional[str] | 否 | 状态码（预留字段） |
+说明：统一仅保留 timestamp，避免多时间列混用；时间展示按 DataLoader 时区格式化。
 
-#### File Not Generated
+### 使用方式
+- 统一 DataFrame 接口（推荐在工具层直接使用）：
+  - Metrics: BaseDataLoader.get_metrics(start_time, end_time)
+  - Logs: BaseDataLoader.get_logs(start_time, end_time)
+  - Traces: BaseDataLoader.get_traces(start_time, end_time)
+- 策略：BaseDataLoader 只做字段校验与类型规范；数据集字段映射由具体 DataLoader 子类负责（OpenRCADataLoader 完成 OpenRCA → 通用字段的转换）。
 
-If the flamegraph file is not generated:
-- Check error messages in the console
-- Verify output directory permissions
-- Ensure sufficient disk space
-- Try a shorter collection duration
+## MetricSemanticAdapter 接口说明
 
-## Configuration
+为了将数据集与领域语义从通用异常检测逻辑中解耦，Metric 工具通过适配器接口提供“语义注入点”。适配器负责派生指标构建、指标分类、绝对阈值与基线参数提供、严重级文本格式化等。通用检测流程仅调用这些接口。
 
-You can customize the agent behavior by modifying:
+### 接口列表与使用场景
 
-- `src/agents/rca_config.py`: System prompts and workflow definitions
-- Tool configurations in `create_rca_deep_agent()` function
+- get_candidate_entities(df, time_range=None, label_selector=None) -> List[str]
+  - 作用：返回候选实体 ID 列表，用于缩小分析范围
+  - 入参：df（统一 Schema 指标表）、time_range（可选 {"start_time","end_time"}）、label_selector（可选字典）
+  - 出参：候选实体 ID 列表
+  - 场景：数据量较大时预筛选；结合场景优先级或标签过滤
+  - 参考实现：OpenRCAMetricAdapter.get_candidate_entities
 
-## Dataset
+- build_derived_metrics(df) -> Optional[pd.DataFrame]
+  - 作用：构造派生指标（例如根据 HeapMemoryMax 与 HeapMemoryUsed 构造 JVM_Heap_Usage）
+  - 入参：df（统一 Schema）
+  - 出参：派生指标 DataFrame（同 Schema），若无派生则返回 None
+  - 场景：原始数据未直接提供关键指标，需要通过组合计算得到
+  - 参考实现：OpenRCAMetricAdapter.build_derived_metrics
 
-The system uses the OpenRCA dataset structure:
-```
-datasets/OpenRCA/{scenario}/telemetry/{date}/{type}/{file}.csv
-```
+- classify_metric(metric_name) -> Optional[Dict[str, Any]]
+  - 作用：将指标名称映射为语义类别与单位，用于后续阈值与基线策略
+  - 入参：metric_name（字符串）
+  - 出参：字典，如 {"kind": "cpu.util", "unit": "percent"}；不识别则返回 None
+  - 场景：筛选“核心”指标；按类别选择检测策略
+  - 参考实现：OpenRCAMetricAdapter.classify_metric
 
-Supported data types:
-- **Logs**: `log_service.csv`
-- **Metrics**: `metric_app.csv`, `metric_container.csv`
-- **Traces**: `trace_span.csv`
+- get_absolute_threshold(metric_class) -> Optional[float]
+  - 作用：提供绝对阈值，用于持续高值检测（即使没有明显变点）
+  - 入参：metric_class（上一步 classify_metric 的返回）
+  - 出参：阈值（float），若该指标不适用绝对阈值则返回 None
+  - 场景：CPU/内存/网络利用率等场景下的阈值告警
+  - 参考实现：OpenRCAMetricAdapter.get_absolute_threshold
 
-## Development
+- get_baseline_params(metric_class) -> Optional[Dict[str, float]]
+  - 作用：提供基线语义参数，用于在基线很小或近零时选择参考值计算偏差
+  - 入参：metric_class（上一步 classify_metric 的返回）
+  - 出参：{"min_baseline_threshold": float, "reference_value": float}
+  - 场景：小基线指标（如 JVM CPULoad、Heap 使用率）避免除以接近 0 的值导致误报
+  - 参考实现：OpenRCAMetricAdapter.get_baseline_params
 
-### Project Structure
+- format_severity(deviation_pct, max_value) -> Optional[str]
+  - 作用：将偏离百分比与最大值转换为可读的严重级描述，便于报告呈现
+  - 入参：deviation_pct（偏离百分比）、max_value（该段最大值）
+  - 出参：文本描述（如“严重（最大值：xx.x，偏离：yy.y%）”），或 None
+  - 场景：对外显示异常结果的严重程度
+  - 参考实现：OpenRCAMetricAdapter.format_severity
 
-```
-RCAAgent/
-├── src/
-│   ├── agents/
-│   │   ├── rca_agents.py         # RCA agent implementations
-│   │   ├── rca_config.py         # RCA configuration and prompts
-│   │   ├── flamegraph_agents.py  # Flamegraph analysis agent
-│   │   └── flamegraph_config.py  # Flamegraph agent configuration
-│   ├── tools/
-│   │   ├── local_log_tool.py        # Log analysis tools
-│   │   ├── local_metric_tool.py     # Metric analysis tools
-│   │   ├── local_trace_tool.py      # Trace analysis tools
-│   │   └── flamegraph_cpu_analyzer.py  # Flamegraph collection and analysis
-│   └── utils/
-│       └── streaming_output.py   # Streaming output handler
-├── examples/
-│   ├── test_rca_agent.py            # Basic RCA test
-│   ├── example_rca_scenario.py      # Multiple RCA scenarios
-│   ├── example_flamegraph_analysis.py  # Interactive flamegraph analysis
-│   └── simulate_cpu_bottleneck.py  # CPU bottleneck simulation for testing
-└── datasets/
-    └── OpenRCA/                     # Dataset files
-```
+### 适配器实现示例
+- 默认适配器：OpenRCAMetricAdapter（已注册为 openrca）
+  - 位置：metric_adapter.py: OpenRCAMetricAdapter
+  - 行为：提供 OpenRCA 数据集的候选实体列表、JVM 派生指标、核心指标分类、绝对阈值与基线参数、严重级文本
+- 空适配器：NullMetricAdapter
+  - 位置：metric_adapter.py: NullMetricAdapter
+  - 行为：返回通用缺省值；用于未注册或未指定适配器时的降级
 
-### Adding New Capabilities
+### 如何配置与使用
+- 在 Metric 工具初始化时按配置创建适配器：见 metric_tool.py: initialize
+- 配置示例：{"metric_adapter": "openrca", "dataset_path": "datasets/OpenRCA/Bank"}
+- 自定义适配器流程：
+  1. 新增类继承 MetricSemanticAdapter 并实现上述接口
+  2. 调用 register_metric_adapter("your_name", lambda: YourAdapter())
+  3. 在配置中设置 "metric_adapter": "your_name"
+  
+## Agent 工具箱
 
-To add new analysis capabilities:
+系统为 Agent 提供了三类核心分析工具，用于从不同维度诊断系统故障。
 
-1. Add methods to the appropriate tool class (`local_log_tool.py`, etc.)
-2. Add corresponding LangChain Tool definitions in `rca_agents.py`
-3. Update the agent prompt in `rca_config.py` to describe the new capability
+### 1. Metric 工具 (LocalMetricAnalysisTool)
+主要用于分析服务与容器的性能指标，识别异常状态。
 
-## Troubleshooting
+- **compare_service_metrics**: 服务指标对比分析
+  - **算法**: Robust Statistics (Trimmed Mean), Baseline Comparison
+  - **功能**: 对比 Target/Baseline 窗口的服务性能 (mrt, sr, rr, cnt)，自动标记 "⚠️ SLOWER" / "✅ FASTER"。
+- **compare_container_metrics**: 容器指标对比分析
+  - **算法**: Robust Statistics (Trimmed Mean, P99)
+  - **功能**: 对比组件的底层资源指标（如 CPU, Memory），识别资源瓶颈。
+- **find_slow_services**: 慢服务检测
+  - **算法**: Threshold-based Filtering
+  - **功能**: 快速筛选平均响应时间超过阈值的服务。
+- **find_low_success_rate_services**: 低成功率服务检测
+  - **算法**: Threshold-based Filtering
+  - **功能**: 快速筛选成功率低于阈值的服务。
+- **get_metric_statistics**: 指标详细统计
+  - **算法**: Robust Statistics
+  - **功能**: 获取指定组件指标的详细分布统计（Mean, P99, StdDev 等）。
+- **get_available_components**: 获取可用组件列表
+  - **算法**: Aggregation / Metadata Query
+  - **功能**: 列出指定时间段内有指标数据的服务与容器组件。
+- **get_available_metrics**: 获取可用指标列表
+  - **算法**: Metadata Query / Filtering
+  - **功能**: 查询指定组件可用的具体指标名称（支持模式匹配）。
+- **detect_metric_anomalies**: 综合指标异常检测
+ - **算法**: Ruptures (Change Point Detection: Pelt/Binseg/Dynp/Window), Z-Score, Dynamic Thresholding
+ - **功能**: 综合使用变点检测、统计异常检测和绝对阈值，对关键性能指标（CPU, Memory, Network, JVM 等）进行多维度异常检测。
 
-**Import Errors**: Make sure all dependencies are installed:
-```bash
-pip install -e .
-```
+### 2. Log 工具 (LocalLogAnalysisTool)
+主要用于日志模式挖掘与错误统计，帮助定位具体的错误信息与异常日志模式。
 
-**API Key Issues**: Ensure your LLM provider API key is set:
-```bash
-export ANTHROPIC_API_KEY="your-key"
-```
+- **get_log_summary**: 日志概览
+  - **算法**: Keyword Counting (Regex)
+  - **功能**: 统计指定时间段内的日志总量、错误/警告日志占比、以及最活跃的服务。
+- **extract_log_templates_drain3**: 日志模板挖掘
+  - **算法**: Drain3 (Online Log Parsing)
+  - **功能**: 从原始日志中提取结构化模板，识别罕见或新增的异常日志模式（Template）。
+- **query_logs**: 日志检索
+  - **算法**: Regex Search
+  - **功能**: 根据服务名称或正则表达式模式检索具体日志条目。
 
-**Data Not Found**: Verify the dataset path in your configuration matches your actual dataset location.
+### 3. Trace 工具 (LocalTraceAnalysisTool)
+主要用于分布式调用链分析，通过统计学方法与异常检测算法定位链路上的性能瓶颈。
 
-**Flamegraph Collection Issues**:
-- **Permission denied**: On macOS, use `sudo -E` to preserve environment variables
-- **Process not found**: Ensure target process is running and is a Python process
-- **File not generated**: Check error messages, verify permissions, and ensure sufficient disk space
-- **py-spy not found**: Install with `pip install py-spy`
+- **train_iforest_model**: 异常检测模型训练 (Isolation Forest)
+  - **算法**: Isolation Forest (Unsupervised Learning), Sliding Window
+  - **功能**: 基于历史 Trace 数据，针对每一对服务调用关系（Parent -> Child）训练异常检测模型。
+- **detect_anomalies_iforest**: 调用链异常检测 (Isolation Forest)
+  - **算法**: Isolation Forest
+  - **功能**: 使用预训练模型检测当前时间段内的 Trace 异常，识别偏离正常模式的调用路径。
+- **detect_anomalies_zscore**: 延迟统计异常检测 (Z-Score)
+  - **算法**: Z-Score (Standard Score)
+  - **功能**: 基于正态分布假设，检测延迟显著偏离均值（如 > 3 sigma）的 Span.
+- **analyze_trace_call_tree**: 单链路分析
+  - **算法**: Graph Traversal (BFS/DFS via NetworkX)
+  - **功能**: 重建并可视化特定 Trace ID 的完整调用树，展示关键路径耗时。
+- **find_slow_spans**: 慢 Span 检索
+  - **算法**: Threshold-based Filtering
+  - **功能**: 找出系统中耗时最长的 Span，定位具体慢接口。
+- **get_dependency_graph**: 依赖拓扑分析
+  - **算法**: Graph Aggregation
+  - **功能**: 统计服务间的调用频率与依赖关系，构建服务拓扑视图。
+- **identify_bottlenecks**: 系统瓶颈识别
+  - **算法**: Duration Aggregation & Impact Analysis
+  - **功能**: 计算各服务总耗时占比，识别对系统整体延迟影响最大的瓶颈服务。
 
-## License
+## 迭代优化记录
 
-MIT
+用于记录每次提示词优化或工具优化对 RCA 定位效果的提升情况。
+**注：以下数据并不是在全量数据集上进行测试，而是在预先选出的几个用例上进行稳定性测试，所以平均成功率看着会比较高。**
+
+| 日期 | 优化类型 | 优化内容 | 平均时延 (min) | 平均输入 token | 平均输出 token | 平均成功率 (%) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2025-12-10 | 第一版本 | 使用python进行log/trace/metric分析 | 18 | 42.25万 | 28404 | 50 |
+| 2025-12-10 | metric工具优化 | 引入rupture库以及z-score算法进行metric异常检测 | 14 | 31万 | 22007 | 60 |
+| 2025-12-12 | 评估决策 | 增加多维度并行评估和最终决策机制以及多轮迭代 | 43 | 85万 | 64849 | 65 |
+| 2026-1-6 | 工具增强，删除python执行 | log增加brain3模板提取，trace增加孤立森林算法，metric增加对称比率过滤 | 17 | 104万 | 30099 | 70 |
