@@ -192,33 +192,27 @@ poetry run python examples/run_root_cause_analysis.py
 
 系统为 Agent 提供了三类核心分析工具，用于从不同维度诊断系统故障。
 
-### 1. Metric 工具 (LocalMetricAnalysisTool)
-主要用于分析服务与容器的性能指标，识别异常状态。
+### 1. Metric 工具 (MetricAnalysisTool)
+面向统一实体（Entity）的时间序列指标分析，支持领域语义适配与多算法异常检测。
 
-- **compare_service_metrics**: 服务指标对比分析
-  - **算法**: Robust Statistics (Trimmed Mean), Baseline Comparison
-  - **功能**: 对比 Target/Baseline 窗口的服务性能 (mrt, sr, rr, cnt)，自动标记 "⚠️ SLOWER" / "✅ FASTER"。
-- **compare_container_metrics**: 容器指标对比分析
-  - **算法**: Robust Statistics (Trimmed Mean, P99)
-  - **功能**: 对比组件的底层资源指标（如 CPU, Memory），识别资源瓶颈。
-- **find_slow_services**: 慢服务检测
-  - **算法**: Threshold-based Filtering
-  - **功能**: 快速筛选平均响应时间超过阈值的服务。
-- **find_low_success_rate_services**: 低成功率服务检测
-  - **算法**: Threshold-based Filtering
-  - **功能**: 快速筛选成功率低于阈值的服务。
+- **get_available_entities**: 可用实体列表
+  - **说明**: 列出时间窗内存在指标数据的实体及其指标数量，便于分析范围预估。
+- **get_available_metrics**: 可用指标列表
+  - **说明**: 按实体与名称模式（可选）过滤，分组展示可用指标；参数为 `entity_id`（已统一为实体标识）。
+- **compare_entity_metrics**: 单实体指标对比（目标 vs 基线）
+  - **说明**: 通过稳健统计（mean、p99）对比目标与基线窗口的指标变化，支持名称列表或模式选择。
 - **get_metric_statistics**: 指标详细统计
-  - **算法**: Robust Statistics
-  - **功能**: 获取指定组件指标的详细分布统计（Mean, P99, StdDev 等）。
-- **get_available_components**: 获取可用组件列表
-  - **算法**: Aggregation / Metadata Query
-  - **功能**: 列出指定时间段内有指标数据的服务与容器组件。
-- **get_available_metrics**: 获取可用指标列表
-  - **算法**: Metadata Query / Filtering
-  - **功能**: 查询指定组件可用的具体指标名称（支持模式匹配）。
-- **detect_metric_anomalies**: 综合指标异常检测
- - **算法**: Ruptures (Change Point Detection: Pelt/Binseg/Dynp/Window), Z-Score, Dynamic Thresholding
- - **功能**: 综合使用变点检测、统计异常检测和绝对阈值，对关键性能指标（CPU, Memory, Network, JVM 等）进行多维度异常检测。
+  - **说明**: 输出指定实体与指标的详细分布统计（mean、std、min、max、p25/p50/p75/p95/p99、non_zero_ratio）。
+- **find_metric_outliers**: 指标异常值扫描（Z-Score）
+  - **算法**: Z-Score（跨实体/指标），支持最小点数与阈值配置
+  - **说明**: 输出时间（按 DataLoader 时区格式化）、实体、指标、值与统计信息。
+- **detect_metric_anomalies**: 综合异常检测（适配器驱动）
+  - **算法**: 变点检测（ruptures: PELT/Binseg/Dynp/Window）、Z-Score 连续点检测、绝对阈值检测
+  - **语义**: 通过 MetricSemanticAdapter 提供派生指标（如 JVM_Heap_Usage）、指标分类、绝对阈值与基线参数、严重级文本
+  - **行为**: 自动候选实体筛选（若未显式传入 `entities`）、仅保留适配器识别的“核心”指标、时区统一由 DataLoader 提供
+  - **返回**: JSON 列表，包含 component_name（实体ID）、faulty_kpi、fault_start_time（ISO，按时区格式化）、severity_score、deviation_pct、method、change_idx
+
+时区与格式化：所有时间输出均通过 DataLoader 的 `get_timezone()` 提供时区，并用工具层 `to_iso_with_tz` 转换。
 
 ### 2. Log 工具 (LocalLogAnalysisTool)
 主要用于日志模式挖掘与错误统计，帮助定位具体的错误信息与异常日志模式。
@@ -231,7 +225,7 @@ poetry run python examples/run_root_cause_analysis.py
   - **功能**: 从原始日志中提取结构化模板，识别罕见或新增的异常日志模式（Template）。
 - **query_logs**: 日志检索
   - **算法**: Regex Search
-  - **功能**: 根据服务名称或正则表达式模式检索具体日志条目。
+  - **功能**: 根据实体（entity_id）或正则表达式模式检索具体日志条目；时间展示按 DataLoader 时区格式化。
 
 ### 3. Trace 工具 (LocalTraceAnalysisTool)
 主要用于分布式调用链分析，通过统计学方法与异常检测算法定位链路上的性能瓶颈。
@@ -241,7 +235,7 @@ poetry run python examples/run_root_cause_analysis.py
   - **功能**: 基于历史 Trace 数据，针对每一对服务调用关系（Parent -> Child）训练异常检测模型。
 - **detect_anomalies_iforest**: 调用链异常检测 (Isolation Forest)
   - **算法**: Isolation Forest
-  - **功能**: 使用预训练模型检测当前时间段内的 Trace 异常，识别偏离正常模式的调用路径。
+  - **功能**: 使用预训练模型检测当前时间段内的 Trace 异常，识别偏离正常模式的调用路径；时间展示按 DataLoader 时区格式化。
 - **detect_anomalies_zscore**: 延迟统计异常检测 (Z-Score)
   - **算法**: Z-Score (Standard Score)
   - **功能**: 基于正态分布假设，检测延迟显著偏离均值（如 > 3 sigma）的 Span.
@@ -250,13 +244,21 @@ poetry run python examples/run_root_cause_analysis.py
   - **功能**: 重建并可视化特定 Trace ID 的完整调用树，展示关键路径耗时。
 - **find_slow_spans**: 慢 Span 检索
   - **算法**: Threshold-based Filtering
-  - **功能**: 找出系统中耗时最长的 Span，定位具体慢接口。
+  - **功能**: 找出系统中耗时最长的 Span，定位具体慢接口；输出时间按 DataLoader 时区格式化。
 - **get_dependency_graph**: 依赖拓扑分析
   - **算法**: Graph Aggregation
   - **功能**: 统计服务间的调用频率与依赖关系，构建服务拓扑视图。
 - **identify_bottlenecks**: 系统瓶颈识别
   - **算法**: Duration Aggregation & Impact Analysis
   - **功能**: 计算各服务总耗时占比，识别对系统整体延迟影响最大的瓶颈服务。
+
+## 提示词与领域适配器集成
+- 指标故障分析与评估提示词由领域适配器动态注入语义：
+  - metric_fault_analyst：使用适配器提供的候选实体与核心指标提示片段
+  - evaluation_sub_agent / decision：附加适配器提供的数据集限制说明，强调“区分数据缺失与分析遗漏”
+- 位置：
+  - 提示构建：src/agents/rca_config.py 的 `get_metric_fault_analyst_prompt`、`get_evaluation_sub_agent_prompt`、`get_evaluation_decision_prompt`
+  - 领域适配器：src/agents/domain_adapter.py 的 `DomainPromptAdapter` 与 `get_prompt_hints`
 
 ## 迭代优化记录
 

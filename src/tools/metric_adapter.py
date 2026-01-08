@@ -28,11 +28,6 @@ class MetricSemanticAdapter(ABC):
     @abstractmethod
     def format_severity(self, deviation_pct: float, max_value: float) -> Optional[str]:
         ...
-    
-    @abstractmethod
-    def get_domain_prompt_hints(self) -> Dict[str, str]:
-        ...
-
 
 class NullMetricAdapter(MetricSemanticAdapter):
     def get_candidate_entities(self, df: pd.DataFrame, time_range: Optional[Dict[str, str]] = None, label_selector: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -54,13 +49,6 @@ class NullMetricAdapter(MetricSemanticAdapter):
 
     def format_severity(self, deviation_pct: float, max_value: float) -> Optional[str]:
         return None
-    
-    def get_domain_prompt_hints(self) -> Dict[str, str]:
-        return {
-            "candidate_entities": "",
-            "core_metrics": "",
-            "dataset_limitations": ""
-        }
 
 
 class OpenRCAMetricAdapter(MetricSemanticAdapter):
@@ -173,13 +161,6 @@ class OpenRCAMetricAdapter(MetricSemanticAdapter):
     def format_severity(self, deviation_pct: float, max_value: float) -> Optional[str]:
         sev = "严重" if deviation_pct > 100 else "显著" if deviation_pct > 50 else "中等"
         return f"{sev}（最大值：{max_value:.1f}，偏离：{deviation_pct:.1f}%）"
-    
-    def get_domain_prompt_hints(self) -> Dict[str, str]:
-        return {
-            "candidate_entities": "候选组件范围：仅关注 apache01、apache02、Tomcat01-04、Mysql01-02、Redis01-02、MG01-02、IG01-02。",
-            "core_metrics": "核心指标范围：CPU、内存、磁盘I/O、磁盘空间、JVM CPU Load、JVM OOM（HeapMemoryUsed/HeapMemoryMax）、网络（带宽、错误、TCP连接、容器Rx/Tx）。",
-            "dataset_limitations": "数据集限制说明：OpenRCA 数据集可能不包含某些系统级指标（如共享存储、节点级资源、部分基础设施或网络存储设备性能），评估时需区分数据缺失与分析遗漏，仅基于实际可用数据进行评估与建议。"
-        }
 
 
 _ADAPTER_REGISTRY: Dict[str, Callable[..., MetricSemanticAdapter]] = {}

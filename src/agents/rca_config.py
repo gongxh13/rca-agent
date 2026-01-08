@@ -4,6 +4,7 @@ RCA Agent Configuration
 System prompts, workflow definitions, and configuration for the RCA agent system.
 """
 
+from typing import Dict, Optional, Any
 # DeepAgent System Prompt
 DEEP_AGENT_SYSTEM_PROMPT = """
 你是**根因分析协调器（RCA Orchestrator）**，负责协调分布式系统故障诊断的完整流程。
@@ -82,11 +83,11 @@ METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT = """
 输出：返回JSON列表，每项包含 component_name、faulty_kpi、fault_start_time（ISO, UTC+8）与severity_score。故障开始时间应为剧烈变化的起始点而非峰值。
 """
 
-from ..tools.metric_adapter import create_metric_adapter
+from .domain_adapter import create_domain_adapter
 
 def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> str:
-    adapter = create_metric_adapter((config or {}).get("metric_analyzer") or {})
-    hints = adapter.get_domain_prompt_hints()
+    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    hints = adapter.get_prompt_hints()
     return f"""
 你是指标故障分析师（Metric Fault Analyst），负责异常检测与故障定界。
 
@@ -100,8 +101,8 @@ def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> 
 """.strip()
 
 def get_evaluation_sub_agent_prompt(config: Optional[Dict[str, Any]] = None) -> str:
-    adapter = create_metric_adapter((config or {}).get("metric_analyzer") or {})
-    hints = adapter.get_domain_prompt_hints()
+    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    hints = adapter.get_prompt_hints()
     return f"""
 你是**评估子代理（Evaluation Sub-Agent）**，负责对根因分析结果进行全面的多维度评估。
 
@@ -192,8 +193,8 @@ def get_evaluation_sub_agent_prompt(config: Optional[Dict[str, Any]] = None) -> 
 """.strip()
 
 def get_evaluation_decision_prompt(config: Optional[Dict[str, Any]] = None) -> str:
-    adapter = create_metric_adapter((config or {}).get("metric_analyzer") or {})
-    hints = adapter.get_domain_prompt_hints()
+    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    hints = adapter.get_prompt_hints()
     return f"""{EVALUATION_DECISION_AGENT_SYSTEM_PROMPT}
 
 {hints.get("dataset_limitations", "")}""".strip()
