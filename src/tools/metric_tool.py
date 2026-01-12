@@ -92,12 +92,21 @@ class MetricAnalysisTool(BaseRCATool):
     
     def _infer_baseline_period(self, start_time: str, end_time: str) -> Tuple[str, str]:
         try:
-            target_start = pd.Timestamp(start_time)
-            target_end = pd.Timestamp(end_time)
+            tz = self.data_loader.get_timezone() if self.data_loader else "UTC"
+            target_start = pd.to_datetime(start_time)
+            target_end = pd.to_datetime(end_time)
+            if getattr(target_start, "tzinfo", None) is None:
+                target_start = target_start.tz_localize(tz)
+            else:
+                target_start = target_start.tz_convert(tz)
+            if getattr(target_end, "tzinfo", None) is None:
+                target_end = target_end.tz_localize(tz)
+            else:
+                target_end = target_end.tz_convert(tz)
             duration = target_end - target_start
             baseline_end = target_start
             baseline_start = baseline_end - duration
-            return to_iso_shanghai(baseline_start), to_iso_shanghai(baseline_end)
+            return to_iso_with_tz(baseline_start, tz), to_iso_with_tz(baseline_end, tz)
         except Exception:
             return "", ""
  

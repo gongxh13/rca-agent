@@ -21,8 +21,8 @@ from ..tools.log_tool import LogAnalysisTool
 from ..tools.metric_tool import MetricAnalysisTool
 from ..tools.trace_tool import TraceAnalysisTool
 from .rca_config import (
-    DEEP_AGENT_SYSTEM_PROMPT,
-    ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT,
+    get_deep_agent_prompt,
+    get_root_cause_localizer_prompt,
     get_metric_fault_analyst_prompt,
     get_evaluation_decision_prompt,
     get_evaluation_sub_agent_prompt,
@@ -89,7 +89,7 @@ def create_root_cause_localizer_agent(
     return create_agent(
         model,
         tools=tools,
-        system_prompt=ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
+        system_prompt=(get_root_cause_localizer_prompt(config) + "\n\n" + BASE_AGENT_PROMPT) if get_root_cause_localizer_prompt(config) else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})
 
@@ -278,33 +278,30 @@ def create_rca_deep_agent(
     if sub_agent_model is None:
         sub_agent_model = model
     
-    # 1. 创建合并后的 Metric Fault Analyst
+    # 1. Metric Fault Analyst
     metric_fault_analyst_agent = create_metric_fault_analyst_agent(sub_agent_model, config)
     
-    # 2. 创建 Root Cause Localizer (保持不变)
+    # 2. Root Cause Localizer
     root_cause_localizer_agent = create_root_cause_localizer_agent(sub_agent_model, config)
     
-    # 3. 创建评估决策 Agent
+    # 4. Evaluation Decision Agent
     evaluation_decision_agent = create_evaluation_decision_agent(sub_agent_model, config)
 
-    # 4. 封装 SubAgents
+    # 5. Encapsulate SubAgents
     subagents = [
         CompiledSubAgent(
             name="metric_fault_analysis_agent",
-            # 描述合并了 Step 1 和 Step 2
-            description="Step 1 Agent: Responsible for Metric Analysis. It handles data preprocessing, threshold calculation, anomaly detection, AND noise filtering to identify confirmed faulty components.",
+            description="Expert in Metric Analysis. Responsible for data preprocessing, threshold calculation, anomaly detection, and noise filtering to identify faulty components.",
             runnable=metric_fault_analyst_agent
         ),
         CompiledSubAgent(
             name="root_cause_localization_agent",
-            # 现在的 Step 2
-            description="Step 2 Agent: Responsible for Root Cause Localization using Traces and Logs based on the confirmed faults.",
+            description="Expert in Root Cause Localization. Responsible for localizing root causes using Traces and Logs based on confirmed faults.",
             runnable=root_cause_localizer_agent
         ),
         CompiledSubAgent(
             name="evaluation_decision_agent",
-            # Step 3
-            description="Step 3 Agent: Responsible for Evaluation and Decision. Evaluates the analysis results from previous agents and makes final decisions based on execution history.",
+            description="Expert in Evaluation and Decision. Responsible for evaluating analysis results from other agents and making final decisions.",
             runnable=evaluation_decision_agent
         ),
     ]
@@ -337,6 +334,6 @@ def create_rca_deep_agent(
     return create_agent(
         model=model,
         name="rca_agent",
-        system_prompt=DEEP_AGENT_SYSTEM_PROMPT + "\n\n" + BASE_AGENT_PROMPT if DEEP_AGENT_SYSTEM_PROMPT else BASE_AGENT_PROMPT,
+        system_prompt=(get_deep_agent_prompt(config) + "\n\n" + BASE_AGENT_PROMPT) if get_deep_agent_prompt(config) else BASE_AGENT_PROMPT,
         middleware=middleware,
     ).with_config({"recursion_limit": 1000})

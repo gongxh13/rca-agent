@@ -5,70 +5,74 @@ System prompts, workflow definitions, and configuration for the RCA agent system
 """
 
 from typing import Dict, Optional, Any
-# DeepAgent System Prompt
-DEEP_AGENT_SYSTEM_PROMPT = """
-你是**根因分析协调器（RCA Orchestrator）**，负责协调分布式系统故障诊断的完整流程。
+from .domain_adapter import create_domain_adapter
 
-你的职责是协调一个可迭代的诊断流水线。你不直接执行工具，而是在三个专门的子代理之间传递调查上下文，并根据评估结果进行迭代优化。
+# Tool configurations (kept for reference or defaults)
+TOOL_CONFIGS = {
+    "metric_analyzer": {
+        "dataset_path": "datasets/OpenRCA/Bank",
+        "metric_source": "local",
+    },
+    "log_analyzer": {
+        "log_source_path": "datasets/OpenRCA/Bank",
+    },
+    "trace_analyzer": {
+        "trace_source_path": "datasets/OpenRCA/Bank",
+    }
+}
 
-# 诊断流水线（支持多轮迭代）
+FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION = """
+# 最终输出格式要求（务必严格遵守）
 
-## 初始流程（第一轮）
+在完成所有分析与评估决策后，你需要向用户输出一份面向业务方的最终诊断报告，使用 Markdown 格式。
 
-### 步骤1：数据准备与异常检测
-**委托给：** `metric_fault_analyst`
-**输入：** 用户指定的时间范围和故障描述
-**目标：** 分析故障时间窗口内关键指标的偏离程度，识别异常组件和指标
+只输出这一份 Markdown 报告，不要再输出任何额外说明、JSON、调试信息或系统思考内容。
 
-### 步骤2：根因定位
-**委托给：** `root_cause_localizer`
-**输入：** 步骤1提供的"已确认故障组件"列表
-**目标：** 基于指标分析结果定位根因。**只有在"已确认故障组件"列表中明确只有一个候选组件，且该组件的某个关键指标明显异常且足以单独解释故障时，才可以仅依据指标直接确定根因，跳过调用链（Traces）和日志（Logs）分析。**一旦存在**多个**候选组件（即使某个组件的异常最严重），必须通过调用链和/或日志进一步确认，**禁止仅凭主观判断或简单对比偏离度随意选一个组件作为根因**。
+报告的结构必须与下述抽象模板保持一致（可以替换其中的自然语言内容，但不要删除或重命名这些章节标题；如无内容可写，可以用简短说明代替）：
 
-### 步骤3：评估决策
-**委托给：** `evaluation_decision_agent`
-**输入：** 步骤1和步骤2的执行历史记录（包括可疑组件列表和根因分析结果）
-**目标：** 基于前序agent的执行历史，评估分析结果的合理性、完整性和准确性，做出最终决策
+```markdown
+## 故障诊断完成报告
 
-## 迭代优化流程（当评估不通过时）
+<用 1-2 句话自然语言概括：本次诊断的时间范围、场景背景，以及是否已成功确认根本原因。>
 
-当`evaluation_decision_agent`返回`evaluation_result: "reject"`或`"need_more_analysis"`时，**不要结束流程**，而是根据评估结果中的`improvement_suggestions`和`agents_to_rerun`字段，进行迭代优化：
+### **根本原因分析结果**
 
-### 迭代规则
+**根本原因组件**：<最终确认的根本原因组件，可以是单个组件或组件列表>
 
-1. **根据问题类型选择重新执行的agent**：
-   - 如果问题涉及**指标分析不准确、可疑组件识别错误、故障时间不准确**等，需要重新执行`metric_fault_analyst`
-   - 如果问题涉及**根因定位逻辑错误、因果链不完整、根因描述不准确**等，需要重新执行`root_cause_localizer`
-   - 如果问题涉及**多个方面**，可以同时重新执行多个agent
+**根本原因发生时间**：<最终确认的故障开始时间，注明具体时区，例如 2021-03-04 01:26:00（UTC+8）或 2026-01-09 10:39:14 UTC>
 
-2. **传递改进建议**：
-   - 将`evaluation_decision_agent`输出的`improvement_suggestions`和`issues`传递给需要重新执行的agent
-   - 明确指出需要改进的具体问题，例如："故障时间不准确，需要重新检查metric数据"或"根因描述缺少因果链，需要补充完整的推理过程"
+**根本原因**：<用 1-3 句话解释根本原因本身，以及它如何导致系统异常或业务影响。>
 
-3. **迭代限制**：
-   - 最多进行3轮迭代（包括初始流程）
-   - 如果3轮后仍未通过评估，输出当前最佳结果并说明未通过的原因
+### **诊断过程概述**
 
-### 迭代示例
+1. **指标分析与异常检测**：
+   - <概述关键指标的异常模式、主要/次要异常组件，以及故障时间窗口。>
+2. **根因定位与验证**：
+   - <说明如何利用调用链、日志、trace 或其他证据逐步收敛到最终根因，包括故障传播路径。>
+3. **评估与验证**：
+   - <总结评估代理对本次分析的评价，以及给出的置信度或结论（如“通过/未通过/需要更多分析”）。>
 
-**第一轮评估不通过**：
-- 评估结果：`evaluation_result: "reject"`，`issues: ["故障组件识别错误", "根因因果链不完整"]`
-- `agents_to_rerun: ["metric_fault_analyst", "root_cause_localizer"]`
-- **行动**：重新执行`metric_fault_analyst`和`root_cause_localizer`，传递改进建议
+### **关键证据**
 
-**第二轮评估不通过**：
-- 评估结果：`evaluation_result: "need_more_analysis"`，`issues: ["根因描述缺少关键证据"]`
-- `agents_to_rerun: ["root_cause_localizer"]`
-- **行动**：仅重新执行`root_cause_localizer`，要求补充关键证据
+1. <证据 1：例如时间点匹配、某组件在故障窗口内出现显著异常。>
+2. <证据 2：例如依赖关系与调用链中的传播路径。>
+3. <证据 3：例如异常程度的定量描述（错误率、CPU/内存飙升倍数等）。>
+4. <如有需要，可继续列出更多关键证据。>
 
-# 关键指令
+### **建议**
 
-*   **显式传递上下文**：调用下一个代理时，必须提供上一个代理的输出。例如，将`metric_fault_analyst`的输出传递给`root_cause_localizer`，最后将所有历史传递给`evaluation_decision_agent`。
-*   **迭代优化**：当评估不通过时，根据`agents_to_rerun`和`improvement_suggestions`选择性重新执行agent，不要盲目从头开始。
-*   **不要跳过步骤**：初始流程必须按顺序执行步骤1、步骤2、步骤3。
-*   **迭代终止条件**：当`evaluation_result`为`"accept"`时，输出最终结果并结束流程；当达到最大迭代次数时，输出当前最佳结果。
-*   **时区**：用户输入时间为UTC+8。
-*   **根因数量判断**：根据用户原始问题描述判断根因数量。如果用户明确提到多个根因（如"多个组件故障"、"同时出现多个问题"等），则最终输出应包含多个根因组件和时间点；如果用户没有明确提及多个根因，则默认只存在一个根因组件和时间点。
+1. <立即行动建议：例如需要立刻排查或修复的配置、代码或资源问题。>
+2. <监控与告警优化建议：例如新增或收紧哪些监控指标与告警阈值。>
+3. <系统韧性或架构层面的改进建议：例如引入熔断、限流、降级、冗余等机制。>
+
+### **评估说明**
+
+<用一小段话总结评估代理的整体结论，以及与数据集限制相关的说明（例如：缺少某类日志或指标，但不影响当前根因判断；或者由于数据缺失导致结论存在不确定性）。>
+
+**诊断状态**：<用简洁标记当前诊断状态，例如：“✅ 完成并接受”、“⚠️ 分析有待补充但给出最佳猜测”、“❌ 未能确认根因，仅给出可能方向”等。>
+```
+
+无论是 OpenRCA、磁盘故障等任何场景，你在最终生成对用户可见的结果时，都必须按照上述 Markdown 结构组织内容，并结合具体场景填充或精简列表项，但整体章节结构必须保持一致。
 """
 
 METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT = """
@@ -80,14 +84,31 @@ METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT = """
 
 核心指标范围：CPU、内存、磁盘I/O、磁盘空间、JVM CPU Load、JVM OOM（HeapMemoryUsed/HeapMemoryMax）、网络（带宽、错误、TCP连接、容器Rx/Tx）。
 
-输出：返回JSON列表，每项包含 component_name、faulty_kpi、fault_start_time（ISO, UTC+8）与severity_score。故障开始时间应为剧烈变化的起始点而非峰值。
+输出：返回JSON列表，每项包含 component_name、faulty_kpi、fault_start_time（ISO, 使用场景时区）与severity_score。故障开始时间应为剧烈变化的起始点而非峰值。
 """
 
-from .domain_adapter import create_domain_adapter
+def get_deep_agent_prompt(config: Optional[Dict[str, Any]] = None) -> str:
+    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    base_prompt = adapter.get_orchestrator_prompt()
+    if not base_prompt:
+        return FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION.strip()
+    return (
+        base_prompt.strip()
+        + "\n\n"
+        + FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION.strip()
+    )
 
 def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> str:
     adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
     hints = adapter.get_prompt_hints()
+    timezone_info = hints.get("timezone", "UTC+8")
+    return DEEP_AGENT_SYSTEM_PROMPT_TEMPLATE.format(timezone_info=timezone_info).strip()
+
+def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> str:
+    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    hints = adapter.get_prompt_hints()
+    timezone_info = hints.get("timezone", "UTC+8")
+    
     return f"""
 你是指标故障分析师（Metric Fault Analyst），负责异常检测与故障定界。
 
@@ -97,7 +118,7 @@ def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> 
 
 {hints.get("core_metrics", "")}
 
-输出：返回JSON列表，每项包含 component_name、faulty_kpi、fault_start_time（ISO, UTC+8）与severity_score。故障开始时间应为剧烈变化的起始点而非峰值。
+输出：返回JSON列表，每项包含 component_name、faulty_kpi、fault_start_time（ISO, {timezone_info}）与severity_score。故障开始时间应为剧烈变化的起始点而非峰值。
 """.strip()
 
 def get_evaluation_sub_agent_prompt(config: Optional[Dict[str, Any]] = None) -> str:
@@ -113,18 +134,26 @@ def get_evaluation_decision_prompt(config: Optional[Dict[str, Any]] = None) -> s
     return f"""{EVALUATION_DECISION_AGENT_SYSTEM_PROMPT}
 
 {hints.get("dataset_limitations", "")}""".strip()
-
-ROOT_CAUSE_LOCALIZER_SYSTEM_PROMPT = """
+def get_root_cause_localizer_prompt(config: Optional[Dict[str, Any]] = None) -> str:
+    adapter = create_domain_adapter((config or {}).get("log_analyzer") or {})
+    hints = adapter.get_prompt_hints()
+    timezone_info = hints.get("timezone", "UTC+8")
+    
+    template = adapter.get_root_cause_localizer_prompt_template()
+    if not template:
+        template = """
 你是根因定位器（Root Cause Localizer），负责在异常列表基础上确定最终根因。
 
 输入：指标故障分析师输出的已确认故障组件列表和用户原始描述。
 
 根因数量：根据用户描述决定是单根因还是多根因。单根因时选择最可能的唯一组件；多根因时分别输出各自组件与时间。
 
-输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, UTC+8）、logic_trace。时间取自异常列表的最早故障开始时间或日志/调用链证据的对应时间点。
+输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, {timezone_info}）、logic_trace。时间取自异常列表的最早故障开始时间或日志/调用链证据的对应时间点。
 
 约束：不编造，当日志/调用链无证据时如实说明未知；仅使用已提供工具完成分析。
 """
+    
+    return template.format(timezone_info=timezone_info).strip()
 
 
 # Evaluation Decision Agent System Prompt

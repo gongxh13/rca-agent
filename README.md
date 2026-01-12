@@ -57,6 +57,75 @@ poetry run python examples/example_rca_scenario.py
   - 评估决策：并行多评估代理综合判定，必要时迭代优化
 - 结果会保存到 outputs/rca
 
+## 磁盘故障注入与日志定位（Disk Fault）
+
+本项目内置了一个磁盘故障注入脚本，用于在 Linux 环境下通过 `scsi_debug` / `dmsetup` / `fio` 等工具模拟磁盘故障，并采集 `kernel/syslog/app` 三类日志，生成可被本项目直接加载分析的数据集。
+
+### 1) 运行故障注入脚本
+
+脚本位置：[disk_fault_injector.py](file:///Users/xuhonggong/Desktop/files/project/huawei/RCAAgent/examples/disk_fault_injector.py)
+
+- 依赖（需要具备 root 权限）：
+  - `modprobe`, `lsblk`, `mount`, `umount`, `mkfs.ext4`, `fio`, `dd`, `truncate`, `blockdev`
+  - 场景 `bad_disk` 额外需要 `dmsetup`；采集内核日志建议安装 `journalctl`
+
+- 典型用法：直接把输出目录写到 `datasets/disk_fault_logs`，后续可直接在 RCA 中选择 Disk Fault 分析
+
+```bash
+sudo python3 examples/disk_fault_injector.py \
+  --output-dir datasets/disk_fault_logs \
+  --interval-seconds 600 \
+  --cycles 3 \
+  --output-layout daily \
+  --noise-mode logger
+```
+
+- 参数说明（常用）：
+  - `--scenario {bad_disk,slow_disk,pressure}`：指定注入场景；不指定则每个 cycle 随机选择
+  - `--interval-seconds`：每次注入窗口时长（秒）
+  - `--cycles`：执行次数（0 表示一直跑直到 Ctrl+C）
+  - `--output-dir`：输出目录（建议设置为 `datasets/disk_fault_logs`）
+  - `--output-layout daily`：按天聚合输出（默认），目录名为 `YYYY-MM-DD`
+  - `--dry-run`：仅打印将执行的命令，不做真实注入
+
+### 2) 输出数据结构（与 DataLoader 对齐）
+
+默认 `--output-layout daily` 时，脚本会按天落盘并追加写入：
+
+```text
+datasets/disk_fault_logs/
+└── 2026-01-12/
+    ├── app.log
+    ├── kernel.log
+    ├── syslog.log
+    └── run.log
+datasets/disk_fault_logs/fault_injection_record.csv
+```
+
+- `app.log/kernel.log/syslog.log`：每行以 UTC ISO 时间戳开头（脚本会做归一化），后面是原始消息
+- `run.log`：每个窗口的执行信息（包含 window / fault_type / trigger_delay 等）
+- `fault_injection_record.csv`：每次注入窗口的 `start_utc/end_utc/trigger_utc/fault_type`，可用作“地面真值”快速缩小定位时间窗
+
+### 3) 用生成的日志做故障定位（推荐流程）
+
+- Step A：用 `fault_injection_record.csv` 快速确定分析时间窗
+  - 以 `trigger_utc` 为中心，建议先取前后 15 分钟作为初始分析窗口
+
+- Step B：用交互式 RCA 进行定位（Disk Fault 域）
+  - 运行交互式分析脚本并选择 `Disk Fault (System Logs)` 场景
+
+```bash
+poetry run python examples/example_rca_scenario.py
+```
+
+  - 输入时间范围（Disk Fault 场景的时间与日志时间均为 UTC；可直接使用 `fault_injection_record.csv` 中的时间）
+  - 系统会主要通过日志工具从 `kernel/syslog/app` 三类日志中提取证据并输出根因组件、故障开始时间与原因解释
+
+  - 建议优先关注的日志证据：
+    - `kernel.log`：I/O error、timeout、blocked tasks、EXT4 错误、scsi_debug/dm-* 相关报错
+    - `syslog.log`：mount/umount/mkfs 失败、服务层报错、系统告警
+    - `app.log`：业务侧延迟/失败（脚本可生成噪声与压力写入日志，便于验证定位链路）
+
 ## 非交互脚本
 - 因果管线（推荐用于离线训练 + 推断）：
   - 预处理数据

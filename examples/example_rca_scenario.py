@@ -14,11 +14,16 @@ This version uses async streaming execution with multiple stream modes:
 import asyncio
 import dotenv
 import os
+import sys
 from datetime import datetime
 import uuid
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 dotenv.load_dotenv()
 
+from InquirerPy import inquirer
+from InquirerPy.base.control import Choice
 from langchain.messages import HumanMessage
 from rich.console import Console
 from rich.panel import Panel
@@ -28,7 +33,7 @@ from src.agents.rca_agents import create_rca_deep_agent
 from src.utils.streaming_output import StreamingOutputHandler, stream_agent_execution
 
 
-def setup_agent():
+def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "openrca"):
     """Initialize the RCA agent with Langfuse tracing."""
     try:
         from langchain_deepseek import ChatDeepSeek
@@ -45,9 +50,19 @@ def setup_agent():
             model="deepseek-chat"
         )
         
+        # Config for the agent
+        # We inject domain type and dataset path
+        # Tools will use this to pick the right loader and prompt adapter
+        config = {
+            "dataset_path": dataset_path,
+            "metric_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+            "log_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+            "trace_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+        }
+        
         rca_agent = create_rca_deep_agent(
             model=model,
-            config={"dataset_path": "datasets/OpenRCA/Bank"}
+            config=config
         )
         
         return rca_agent, langfuse_handler
@@ -216,15 +231,36 @@ async def main():
     console = Console()
     
     console.print()
-    console.print(Rule("[bold cyan]RCA Agent - OpenRCA 数据集故障分析[/bold cyan]", style="cyan"))
+    console.print(Rule("[bold cyan]RCA Agent - 交互式故障分析[/bold cyan]", style="cyan"))
     console.print()
+
+    # Domain Selection
+    console.print("[bold yellow]请选择分析场景 / Select Analysis Domain:[/bold yellow]")
     
+    domain_choice = await inquirer.select(
+        message="请选择分析场景 / Select Analysis Domain:",
+        choices=[
+            Choice(value="1", name="1. OpenRCA (Microservices/Bank)"),
+            Choice(value="2", name="2. Disk Fault (System Logs)")
+        ],
+        default="1"
+    ).execute_async()
+    
+    if domain_choice == "1":
+        domain = "openrca"
+        dataset_path = "datasets/OpenRCA/Bank"
+    else:
+        domain = "disk_fault"
+        dataset_path = "datasets/disk_fault_logs"
+
     # Initialize agent
     console.print()
     console.print(Rule("[bold yellow]初始化 RCA Agent...[/bold yellow]", style="yellow"))
+    console.print(f"Domain: {domain}")
+    console.print(f"Dataset: {dataset_path}")
     console.print()
     
-    agent, langfuse_handler = setup_agent()
+    agent, langfuse_handler = setup_agent(dataset_path=dataset_path, domain=domain)
     if agent is None or langfuse_handler is None:
         console.print("[bold red]初始化失败，退出。[/bold red]")
         return
@@ -244,13 +280,12 @@ async def main():
             
             # 询问是否继续
             console.print()
-            continue_analysis = Prompt.ask(
-                "[bold yellow]是否继续分析其他故障？[/bold yellow]",
-                choices=["y", "n", "yes", "no"],
-                default="n"
-            )
+            continue_analysis = await inquirer.confirm(
+                message="是否继续分析其他故障？/ Continue with another fault?",
+                default=False
+            ).execute_async()
             
-            if continue_analysis.lower() in ["n", "no"]:
+            if not continue_analysis:
                 break
             
         except KeyboardInterrupt:
@@ -263,13 +298,12 @@ async def main():
             console.print(traceback.format_exc())
             
             # 询问是否继续
-            continue_analysis = Prompt.ask(
-                "[bold yellow]是否继续？[/bold yellow]",
-                choices=["y", "n", "yes", "no"],
-                default="n"
-            )
+            continue_analysis = await inquirer.confirm(
+                message="是否继续？/ Continue?",
+                default=False
+            ).execute_async()
             
-            if continue_analysis.lower() in ["n", "no"]:
+            if not continue_analysis:
                 break
     
     console.print()
