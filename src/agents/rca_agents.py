@@ -14,7 +14,7 @@ from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from deepagents import create_deep_agent, CompiledSubAgent
 from deepagents.graph import BASE_AGENT_PROMPT
 from deepagents.middleware.subagents import CompiledSubAgent, SubAgent, SubAgentMiddleware
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.graph.message import add_messages
 
 from ..tools.log_tool import LogAnalysisTool
@@ -28,14 +28,20 @@ from .rca_config import (
     get_evaluation_sub_agent_prompt,
     TOOL_CONFIGS
 )
-from .middleware import AgentHistoryRecordingMiddleware, AgentHistoryInjectionMiddleware, ExecutionHistory, SubAgentHistoryMergeMiddleware, AgentExecutionHistoryState
+from .middleware import AgentHistoryRecordingMiddleware, AgentHistoryInjectionMiddleware, ExecutionHistory
+
+
+
+def merge_dicts(current_state: dict, new_value: dict) -> dict:
+    current_state.update(new_value)
+    return current_state
 
 
 # Define state for evaluation decision agent graph
 class EvaluationDecisionState(TypedDict, total=False):
     """State for evaluation decision agent graph."""
     messages: Annotated[List[BaseMessage], add_messages]
-    agent_execution_history: Dict[str, ExecutionHistory]
+    extend_data: Annotated[Dict[str, Any], merge_dicts]
     evaluation_results: Annotated[List[BaseMessage], add_messages]
     final_decision: Optional[str]
 
@@ -258,6 +264,9 @@ def create_evaluation_decision_agent(
     return graph.compile()
 
 
+class GraphState(MessagesState):
+    extend_data: Annotated[Dict[str, Any], merge_dicts]
+
 def create_rca_deep_agent(
     model: BaseChatModel,
     sub_agent_model: Optional[BaseChatModel] = None,
@@ -277,7 +286,40 @@ def create_rca_deep_agent(
     # Use same model for sub-agents if not specified
     if sub_agent_model is None:
         sub_agent_model = model
-    
+
+    middleware = create_sub_agent_middleware(model, sub_agent_model, config)
+
+    return create_agent(
+        model=model,
+        name="rca_agent",
+        system_prompt=(get_deep_agent_prompt(config) + "\n\n" + BASE_AGENT_PROMPT) if get_deep_agent_prompt(config) else BASE_AGENT_PROMPT,
+        middleware=middleware,
+        state_schema=GraphState,
+    ).with_config({"recursion_limit": 1000})
+
+
+def create_sub_agent_middleware(
+    model: Optional[BaseChatModel] = None,
+    sub_agent_model: Optional[BaseChatModel] = None,
+    config: Optional[Dict[str, Any]] = None
+):
+    if model is None:
+        model = sub_agent_model = ChatOpenAI(
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            http_client=sync_client,
+            http_async_client=async_client,
+        )
+    if not config:
+        dataset_path = "datasets/OpenRCA/Bank"
+        domain = "openrca"
+        config = {
+            "dataset_path": dataset_path,
+            "metric_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+            "log_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+            "trace_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
+        }
     # 1. Metric Fault Analyst
     metric_fault_analyst_agent = create_metric_fault_analyst_agent(sub_agent_model, config)
     
@@ -308,7 +350,6 @@ def create_rca_deep_agent(
 
     middleware = [
         TodoListMiddleware(),
-        SubAgentHistoryMergeMiddleware(),
         SubAgentMiddleware(
             default_model=model,
             subagents=subagents if subagents is not None else [],
@@ -330,10 +371,4 @@ def create_rca_deep_agent(
         ),
         PatchToolCallsMiddleware(),
     ]
-
-    return create_agent(
-        model=model,
-        name="rca_agent",
-        system_prompt=(get_deep_agent_prompt(config) + "\n\n" + BASE_AGENT_PROMPT) if get_deep_agent_prompt(config) else BASE_AGENT_PROMPT,
-        middleware=middleware,
-    ).with_config({"recursion_limit": 1000})
+    return middleware

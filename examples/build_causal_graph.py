@@ -21,9 +21,9 @@ def main():
     """Main function."""
     # Configuration
     dataset_path = "datasets/OpenRCA/Bank"
-    data_file = "output/causal_data/all_data.csv"
-    topology_file = "output/causal_data/service_topology.graphml"
-    output_dir = "output/causal_graph"
+    data_file = "outputs/causal_data/all_data.csv"
+    topology_file = "outputs/causal_data/service_topology.graphml"
+    output_dir = "outputs/causal_graph"
     alpha = 0.05
     use_trace_prior = True
     algorithm = 'varlingam'  # Options: 'pc', 'pcmci', 'granger', 'varlingam', 'granger_pc'
@@ -78,8 +78,8 @@ def main():
         service_topology = results['service_topology']
         
         # Save for next time
-        Path("output/causal_data").mkdir(parents=True, exist_ok=True)
-        preprocessor.save_results(results, "output/causal_data", datetime_as_timestamp=True)
+        Path("outputs/causal_data").mkdir(parents=True, exist_ok=True)
+        preprocessor.save_results(results, "outputs/causal_data", datetime_as_timestamp=True)
     
     # Initialize causal graph builder
     builder = CausalGraphBuilder(
@@ -151,4 +151,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

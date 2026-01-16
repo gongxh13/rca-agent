@@ -147,7 +147,7 @@ def main():
 
 if __name__ == "__main__":
     # Default: visualize the output topology
-    default_path = "output/causal_data/service_topology.graphml"
+    default_path = "outputs/causal_data/service_topology.graphml"
     
     if len(sys.argv) > 1:
         main()
@@ -163,4 +163,3 @@ if __name__ == "__main__":
         else:
             print(f"Error: {default_path} not found")
             print("Please specify the path to your GraphML file")
-

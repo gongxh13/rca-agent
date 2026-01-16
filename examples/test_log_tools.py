@@ -61,13 +61,13 @@ def test_log_tools():
         service_name=None,
         min_count=2,
         include_params=True,
-        model_path="artifacts/drain3/cumulative_all/model.pkl",
+        model_path="outputs/artifacts/drain3/cumulative_all/model.pkl",
     )
     print(out)
 
     summary = tool.train_log_templates_drain3_cumulative(
         date_list=["2021_03_04","2021_03_25"],
-        output_dir="artifacts/drain3/cumulative_all",
+        output_dir="outputs/artifacts/drain3/cumulative_all",
     )
     print(summary)
 

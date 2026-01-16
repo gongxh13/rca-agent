@@ -54,7 +54,7 @@ results = preprocessor.prepare_causal_data(
 )
 
 # Save results
-preprocessor.save_results(results, "output/causal_data")
+preprocessor.save_results(results, "outputs/causal_data")
 ```
 
 ### Step 2: Build Causal Graph
@@ -65,8 +65,8 @@ import pandas as pd
 import networkx as nx
 
 # Load preprocessed data
-wide_table = pd.read_csv("output/causal_data/all_data.csv", index_col=0, parse_dates=True)
-service_topology = nx.read_graphml("output/causal_data/service_topology.graphml")
+wide_table = pd.read_csv("outputs/causal_data/all_data.csv", index_col=0, parse_dates=True)
+service_topology = nx.read_graphml("outputs/causal_data/service_topology.graphml")
 
 # Initialize builder
 builder = CausalGraphBuilder(
@@ -88,8 +88,8 @@ causal_graph = builder.optimize_graph(
 )
 
 # Save graph
-builder.save_graph(causal_graph, "output/causal_graph/causal_graph.graphml")
-builder.save_edges_csv(causal_graph, "output/causal_graph/causal_edges.csv")
+builder.save_graph(causal_graph, "outputs/causal_graph/causal_graph.graphml")
+builder.save_edges_csv(causal_graph, "outputs/causal_graph/causal_edges.csv")
 ```
 
 ## Example Scripts
@@ -186,4 +186,3 @@ poetry install
 # or
 pip install causallearn dowhy scikit-learn scipy
 ```
-

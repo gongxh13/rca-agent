@@ -51,7 +51,7 @@ def test_traces():
 
     train_start = "2021-03-04T00:00:00"
     train_end = "2021-03-04T23:59:59"
-    model_path = "artifacts/iforest/iforest_OpenRCA_Bank_2021-03-04.pkl"
+    model_path = "outputs/artifacts/iforest/iforest_OpenRCA_Bank_2021-03-04.pkl"
     
     print(f"Training model on {train_start} to {train_end}...")
     print(tool.train_iforest_model(train_start, train_end, save_path=model_path))

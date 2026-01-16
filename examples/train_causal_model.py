@@ -24,11 +24,11 @@ def main():
     algorithm = 'varlingam'  # Algorithm used for graph construction
     
     # Input files
-    data_file = "output/causal_data/all_data.csv"
-    graph_file = f"output/causal_graph/{algorithm}/causal_graph.graphml"
+    data_file = "outputs/causal_data/all_data.csv"
+    graph_file = f"outputs/causal_graph/{algorithm}/causal_graph.graphml"
     
     # Output
-    output_dir = f"output/causal_model/{algorithm}"
+    output_dir = f"outputs/causal_model/{algorithm}"
     model_file = f"{output_dir}/scm_model.pkl"
     scm_graph_file = f"{output_dir}/scm_graph.graphml"
     

@@ -881,7 +881,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="disk_fault_injector.py")
     p.add_argument("--interval-seconds", type=int, default=300)
     p.add_argument("--cycles", type=int, default=0)
-    p.add_argument("--output-dir", type=str, default=str(Path.cwd() / "fault_logs"))
+    p.add_argument("--output-dir", type=str, default=str(Path.cwd() / "outputs" / "fault_logs"))
     p.add_argument("--record-csv", type=str, default="")
     p.add_argument("--app-source", type=str, default="/var/log/app.log")
     p.add_argument("--syslog-source", type=str, default="")

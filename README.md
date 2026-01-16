@@ -55,7 +55,7 @@ poetry run python examples/example_rca_scenario.py
   - 指标故障分析：识别异常组件与故障开始时间
   - 根因定位：结合日志/调用链补证并产出根因解释
   - 评估决策：并行多评估代理综合判定，必要时迭代优化
-- 结果会保存到 outputs/rca
+- 结果会保存到 outputs/rca/md
 
 ## 磁盘故障注入与日志定位（Disk Fault）
 

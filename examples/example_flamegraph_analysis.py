@@ -284,15 +284,15 @@ async def collect_flamegraph(console: Console) -> Optional[str]:
     console.print(f"[bold green]✓ 已选择进程: PID {pid}[/bold green]")
     console.print()
     
-    # 获取默认的火焰图存储目录（当前路径下的 data/flamegraphs/）
-    default_flamegraph_dir = os.path.join(os.getcwd(), "data", "flamegraphs")
+    # 获取默认的火焰图存储目录（当前路径下的 outputs/flamegraphs/）
+    default_flamegraph_dir = os.path.join(os.getcwd(), "outputs", "flamegraphs")
     
     # 选择输出路径（提供默认选项或手动输入）
     output_dir_choice = run_inquirer_sync(
         lambda: inquirer.select(
             message="选择输出目录:",
             choices=[
-                Choice(value="data", name=f"data/flamegraphs/ - 项目数据目录（推荐）"),
+                Choice(value="data", name=f"outputs/flamegraphs/ - 项目输出目录（推荐）"),
                 Choice(value="tmp", name=f"/tmp - 系统临时目录"),
                 Choice(value="current", name=f"{os.getcwd()} - 当前目录"),
                 Choice(value="custom", name="自定义路径")
@@ -967,4 +967,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

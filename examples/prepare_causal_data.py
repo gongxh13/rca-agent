@@ -21,7 +21,7 @@ def main():
     start_date = "2021-03-04"
     end_date = "2021-03-05"  # Use multiple days for better causal discovery
     time_granularity = "10min"  # 5 minutes for causal graph construction
-    output_dir = "output/causal_data"
+    output_dir = "outputs/causal_data"
     include_app_metrics = True
     
     print("=" * 60)
@@ -97,4 +97,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

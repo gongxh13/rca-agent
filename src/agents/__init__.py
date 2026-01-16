@@ -14,25 +14,18 @@ from .flamegraph_agents import (
     create_flamegraph_auto_profiling_agent,
 )
 
-# RCA agents are optional at import-time (avoid breaking flamegraph-only usage)
-try:  # pragma: no cover
-    from .rca_agents import (
-        create_log_analysis_agent,
-        create_metric_analysis_agent,
-        create_trace_analysis_agent,
-        create_rca_deep_agent,
-    )
-except Exception:  # pragma: no cover
-    create_log_analysis_agent = None  # type: ignore
-    create_metric_analysis_agent = None  # type: ignore
-    create_trace_analysis_agent = None  # type: ignore
-    create_rca_deep_agent = None  # type: ignore
+from .rca_agents import (
+    create_sub_agent_middleware,
+)
+
+try:
+    from src.agents.agent_state import agent_registry
+    agent_registry.register("rca", create_sub_agent_middleware())
+except ImportError:
+    print("Failed to import agent_registry")
+    pass
 
 __all__ = [
     "create_flamegraph_analysis_agent",
     "create_flamegraph_auto_profiling_agent",
-    "create_log_analysis_agent",
-    "create_metric_analysis_agent",
-    "create_trace_analysis_agent",
-    "create_rca_deep_agent",
 ]

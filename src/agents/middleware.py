@@ -4,7 +4,7 @@ Custom Middleware for RCA Agent System
 This module provides middleware for recording and injecting agent execution history.
 """
 
-from typing import Annotated, Dict, List
+from typing import Annotated, Dict, List, Any
 from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -30,7 +30,7 @@ def create_empty_execution_history() -> ExecutionHistory:
 # Other fields (messages, input, output, etc.) come from langchain's standard state
 class AgentExecutionHistoryState(TypedDict, total=False):
     """State schema that extends langchain's standard state with agent execution history tracking."""
-    agent_execution_history: Annotated[Dict[str, ExecutionHistory], merge_dicts]
+    extend_data: Annotated[Dict[str, Any], merge_dicts]
 
 
 class AgentHistoryRecordingMiddleware(AgentMiddleware):
@@ -58,21 +58,25 @@ class AgentHistoryRecordingMiddleware(AgentMiddleware):
         """
         Called after agent execution. Store the messages history.
         """
+        # Initialize extend_data if not exists
+        if "extend_data" not in state:
+            state["extend_data"] = {}
+            
         # Initialize history storage if not exists
-        if "agent_execution_history" not in state:
-            state["agent_execution_history"] = {}
+        if "agent_execution_history" not in state["extend_data"]:
+            state["extend_data"]["agent_execution_history"] = {}
         
         # Initialize agent history if not exists
-        if self.record_agent_name not in state["agent_execution_history"]:
-            state["agent_execution_history"][self.record_agent_name] = create_empty_execution_history()
+        if self.record_agent_name not in state["extend_data"]["agent_execution_history"]:
+            state["extend_data"]["agent_execution_history"][self.record_agent_name] = create_empty_execution_history()
         
         # Store messages from current state
         current_messages = state.get("messages", [])
-        existing_messages = state["agent_execution_history"][self.record_agent_name]["messages"]
+        existing_messages = state["extend_data"]["agent_execution_history"][self.record_agent_name]["messages"]
         # Only add new messages that aren't already in the history
         existing_message_ids = {id(msg) for msg in existing_messages}
         new_messages = [msg for msg in current_messages if id(msg) not in existing_message_ids]
-        state["agent_execution_history"][self.record_agent_name]["messages"].extend(new_messages)
+        state["extend_data"]["agent_execution_history"][self.record_agent_name]["messages"].extend(new_messages)
         
         return state
     
@@ -80,35 +84,27 @@ class AgentHistoryRecordingMiddleware(AgentMiddleware):
         """
         Async version of after_agent. Store the messages history.
         """
+        # Initialize extend_data if not exists
+        if "extend_data" not in state:
+            state["extend_data"] = {}
+
         # Initialize history storage if not exists
-        if "agent_execution_history" not in state:
-            state["agent_execution_history"] = {}
+        if "agent_execution_history" not in state["extend_data"]:
+            state["extend_data"]["agent_execution_history"] = {}
         
         # Initialize agent history if not exists
-        if self.record_agent_name not in state["agent_execution_history"]:
-            state["agent_execution_history"][self.record_agent_name] = create_empty_execution_history()
+        if self.record_agent_name not in state["extend_data"]["agent_execution_history"]:
+            state["extend_data"]["agent_execution_history"][self.record_agent_name] = create_empty_execution_history()
         
         # Store messages from current state
         current_messages = state.get("messages", [])
-        existing_messages = state["agent_execution_history"][self.record_agent_name]["messages"]
+        existing_messages = state["extend_data"]["agent_execution_history"][self.record_agent_name]["messages"]
         # Only add new messages that aren't already in the history
         existing_message_ids = {id(msg) for msg in existing_messages}
         new_messages = [msg for msg in current_messages if id(msg) not in existing_message_ids]
-        state["agent_execution_history"][self.record_agent_name]["messages"].extend(new_messages)
+        state["extend_data"]["agent_execution_history"][self.record_agent_name]["messages"].extend(new_messages)
         
         return state
-
-
-class SubAgentHistoryMergeMiddleware(AgentMiddleware):
-    """
-    Middleware that merges execution history from sub-agents into the parent agent's state.
-    
-    This middleware intercepts tool calls (sub-agents are called as tools) and merges
-    their execution history into the parent agent's state.
-    """
-    
-    # Define state schema for this middleware
-    state_schema = AgentExecutionHistoryState
 
 
 class AgentHistoryInjectionMiddleware(AgentMiddleware):
@@ -202,7 +198,7 @@ class AgentHistoryInjectionMiddleware(AgentMiddleware):
         Converts tool messages to user messages and removes tool_calls to prevent evaluation agent confusion.
         """
         # Get execution history from state
-        execution_history = state.get("agent_execution_history", {})
+        execution_history = state.get("extend_data", {}).get("agent_execution_history", {})
         
         # Get histories
         metric_history = execution_history.get("metric_fault_analyst", {})
@@ -238,7 +234,7 @@ class AgentHistoryInjectionMiddleware(AgentMiddleware):
         Converts tool messages to user messages and removes tool_calls to prevent evaluation agent confusion.
         """
         # Get execution history from state
-        execution_history = state.get("agent_execution_history", {})
+        execution_history = state.get("extend_data", {}).get("agent_execution_history", {})
         
         # Get histories
         metric_history = execution_history.get("metric_fault_analyst", {})

@@ -210,7 +210,7 @@ async def run_analysis(
         output = result or "No output"
         console.print(Panel(output, title="[bold green]最终结果[/bold green]", border_style="green"))
         
-        save_dir = os.path.join(os.getcwd(), "outputs", "rca")
+        save_dir = os.path.join(os.getcwd(), "outputs", "rca", "md")
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique = uuid.uuid4().hex[:6]

@@ -25,7 +25,7 @@ def main():
     algorithm = 'varlingam'
     
     # Input files
-    model_file = f"output/causal_model/{algorithm}/scm_model.pkl"
+    model_file = f"outputs/causal_model/{algorithm}/scm_model.pkl"
     
     # Fault scenario configuration
     # Example fault: ServiceTest1 latency increase
@@ -207,7 +207,8 @@ def main():
             
         # Save results
         out_target = result['target_node']
-        output_file = f"output/rca_result_{out_target}.json"
+        Path("outputs/rca").mkdir(parents=True, exist_ok=True)
+        output_file = f"outputs/rca/rca_result_{out_target}.json"
         with open(output_file, 'w') as f:
             json.dump(result, f, indent=2)
         print(f"Results saved to {output_file}")

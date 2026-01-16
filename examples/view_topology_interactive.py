@@ -193,7 +193,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Visualize topology interactively with Pyecharts')
     parser.add_argument('graphml_path', type=str, nargs='?', 
-                        default="output/causal_data/service_topology.graphml",
+                        default="outputs/causal_data/service_topology.graphml",
                         help='Path to GraphML file')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Output HTML file path')
