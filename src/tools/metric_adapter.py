@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 import re
-from src.utils import schema
+from ..utils import schema
 
 class MetricSemanticAdapter(ABC):
     @abstractmethod

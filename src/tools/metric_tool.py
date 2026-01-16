@@ -15,11 +15,11 @@ import numpy as np
 import json
 import ruptures as rpt
 
-from src.utils.time_utils import to_iso_with_tz
+from ..utils.time_utils import to_iso_with_tz
 from .data_loader import BaseDataLoader, create_data_loader
 from .metric_adapter import MetricSemanticAdapter
 from .metric_adapter import create_metric_adapter
-from src.utils import schema
+from ..utils import schema
 
 
 class MetricAnalysisTool(BaseRCATool):

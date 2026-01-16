@@ -16,8 +16,8 @@ import os
 
 from .base import BaseRCATool
 from .data_loader import BaseDataLoader, create_data_loader
-from src.utils.time_utils import to_iso_with_tz
-from src.utils.schema import (
+from ..utils.time_utils import to_iso_with_tz
+from ..utils.schema import (
     COL_TIMESTAMP,
     COL_ENTITY_ID,
     COL_TRACE_ID,

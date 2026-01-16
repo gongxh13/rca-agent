@@ -2,7 +2,7 @@ import pandas as pd
 from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
 from abc import ABC, abstractmethod
-from src.utils.schema import (
+from ..utils.schema import (
     COL_TIMESTAMP,
     COL_ENTITY_ID,
     COL_MESSAGE,
