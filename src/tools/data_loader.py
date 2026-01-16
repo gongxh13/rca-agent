@@ -333,15 +333,19 @@ class OpenRCADataLoader(BaseDataLoader):
         return combined[keep] if all(c in combined.columns for c in keep) else pd.DataFrame()
 
 
-class DiskFaultDataLoader(BaseDataLoader):
+class GenericLogDataLoader(BaseDataLoader):
+    """
+    通用日志加载器：
+    1. 不限制日志文件名（扫描目录下的所有文件）。
+    2. 优先按日期目录（YYYY-MM-DD）查找，如果找不到则扫描根目录。
+    3. 尝试通用方式解析时间戳（默认假设每行以 ISO 时间戳开头）。
+    """
     def __init__(self, dataset_path: str, default_timezone: str = "UTC"):
         super().__init__(default_timezone=default_timezone)
         self.dataset_path = Path(dataset_path)
         self._cache: Dict[str, pd.DataFrame] = {}
 
     def load_metrics(self, start_time: str, end_time: str) -> pd.DataFrame:
-        # Currently we don't have metric files, but we could parse fault_injection_record.csv
-        # as a ground truth event stream if needed. For now, return empty.
         return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_METRIC_NAME, COL_VALUE])
 
     def load_traces(self, start_time: str, end_time: str) -> pd.DataFrame:
@@ -355,93 +359,135 @@ class DiskFaultDataLoader(BaseDataLoader):
         if end_dt.tzinfo is None:
             end_dt = end_dt.tz_localize(self._tz)
 
-        # Iterate over all daily directories
-        dfs = []
-        # Assumption: directories are named YYYY-MM-DD
-        # We can just iterate all and filter by date, or construct expected paths
-        # Constructing paths is more efficient but requires knowing the range
+        # 1. 确定需要扫描的目录
+        # 策略：先尝试按日期目录查找。
+        # 如果 dataset_path 下存在 YYYY-MM-DD 格式的文件夹，则只扫描这些文件夹。
+        # 否则，扫描 dataset_path 下的所有文件。
         
+        target_dirs = []
         current_date = start_dt.date()
         end_date_val = end_dt.date()
         
-        dates_to_load = []
+        has_date_dirs = False
         while current_date <= end_date_val:
-            dates_to_load.append(current_date.strftime("%Y-%m-%d"))
+            date_str = current_date.strftime("%Y-%m-%d")
+            day_dir = self.dataset_path / date_str
+            if day_dir.exists() and day_dir.is_dir():
+                target_dirs.append(day_dir)
+                has_date_dirs = True
             current_date += pd.Timedelta(days=1)
             
-        for date_str in dates_to_load:
-            day_dir = self.dataset_path / date_str
-            if not day_dir.exists():
+        if not has_date_dirs:
+            # 如果没有找到任何日期目录，则假设是扁平结构，扫描根目录
+            if self.dataset_path.exists():
+                target_dirs.append(self.dataset_path)
+
+        dfs = []
+        
+        for d in target_dirs:
+            # 遍历目录下的所有文件
+            try:
+                for file_path in d.iterdir():
+                    if not file_path.is_file():
+                        continue
+                    if file_path.name.startswith("."): # 跳过隐藏文件
+                        continue
+                        
+                    # 缓存键
+                    key = f"{file_path.parent.name}_{file_path.name}"
+                    if key in self._cache:
+                        dfs.append(self._cache[key])
+                        continue
+                    
+                    try:
+                        # 读取文件
+                        # 假设 UTF-8，忽略错误
+                        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                            lines = f.readlines()
+                        
+                        data = []
+                        # 使用文件名作为 entity_id (去掉扩展名)
+                        entity_id = file_path.stem
+                        
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            
+                            ts_val = None
+                            msg_val = None
+                            
+                            # 尝试解析时间戳
+                            # 策略 1: 尝试 "日期 时间" 格式 (e.g., 2024-01-01 10:00:05)
+                            parts2 = line.split(" ", 2)
+                            if len(parts2) >= 3:
+                                potential_ts = f"{parts2[0]} {parts2[1]}"
+                                try:
+                                    ts = pd.to_datetime(potential_ts)
+                                    ts_val = ts
+                                    msg_val = parts2[2]
+                                except:
+                                    pass
+                            
+                            # 策略 2: 如果策略 1 失败，尝试 "ISO/紧凑" 格式 (e.g., 2024-01-01T10:00:05Z)
+                            if ts_val is None:
+                                parts1 = line.split(" ", 1)
+                                if len(parts1) >= 2:
+                                    try:
+                                        ts = pd.to_datetime(parts1[0])
+                                        ts_val = ts
+                                        msg_val = parts1[1]
+                                    except:
+                                        pass
+
+                            if ts_val is not None:
+                                try:
+                                    ts_ms = int(ts_val.timestamp() * 1000)
+                                    data.append({
+                                        COL_TIMESTAMP: ts_ms,
+                                        COL_ENTITY_ID: entity_id,
+                                        COL_MESSAGE: msg_val,
+                                        COL_SEVERITY: "INFO" # 默认
+                                    })
+                                except:
+                                    continue
+                        
+                        if data:
+                            df = pd.DataFrame(data)
+                            self._cache[key] = df
+                            dfs.append(df)
+                            
+                    except Exception as e:
+                        # 读取单个文件失败不应中断整个过程
+                        print(f"Warning: Failed to read log file {file_path}: {e}")
+                        continue
+            except Exception as e:
+                print(f"Warning: Failed to scan directory {d}: {e}")
                 continue
-            
-            for log_file in ["app.log", "kernel.log", "syslog.log"]:
-                file_path = day_dir / log_file
-                if not file_path.exists():
-                    continue
-                
-                key = f"{date_str}_{log_file}"
-                if key in self._cache:
-                    dfs.append(self._cache[key])
-                    continue
-                
-                try:
-                    # Read file, assuming ISO timestamp at start
-                    # We'll read line by line or use pandas if format is consistent
-                    # Since lines might be messy, let's read as text and parse
-                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                        lines = f.readlines()
-                    
-                    data = []
-                    entity_id = log_file.split(".")[0]  # app, kernel, syslog
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        # Attempt to split timestamp and message
-                        # Format: 2026-01-09T16:55:06.123Z ...
-                        # Split by first space
-                        parts = line.split(" ", 1)
-                        if len(parts) < 2:
-                            continue
-                        ts_str, msg = parts[0], parts[1]
-                        
-                        try:
-                            ts = pd.to_datetime(ts_str)
-                            # Convert to ms int
-                            ts_ms = int(ts.timestamp() * 1000)
-                            data.append({
-                                COL_TIMESTAMP: ts_ms,
-                                COL_ENTITY_ID: entity_id,
-                                COL_MESSAGE: msg,
-                                COL_SEVERITY: "INFO" # Default
-                            })
-                        except Exception:
-                            # If timestamp parse fails, skip or treat as continuation?
-                            # For simplicity, skip
-                            continue
-                    
-                    if data:
-                        df = pd.DataFrame(data)
-                        self._cache[key] = df
-                        dfs.append(df)
-                        
-                except Exception as e:
-                    print(f"Error reading {file_path}: {e}")
-                    continue
 
         if not dfs:
             return pd.DataFrame(columns=[COL_TIMESTAMP, COL_ENTITY_ID, COL_MESSAGE, COL_SEVERITY])
 
         combined = pd.concat(dfs, ignore_index=True)
         
-        # Filter by exact time range
+        # 按时间过滤
         start_ms = int(start_dt.timestamp() * 1000)
         end_ms = int(end_dt.timestamp() * 1000)
         
-        combined = combined[(combined[COL_TIMESTAMP] >= start_ms) & (combined[COL_TIMESTAMP] <= end_ms)]
-        
+        if COL_TIMESTAMP in combined.columns:
+            combined = combined[(combined[COL_TIMESTAMP] >= start_ms) & (combined[COL_TIMESTAMP] <= end_ms)]
+            
         return combined
+
+
+class DiskFaultDataLoader(GenericLogDataLoader):
+    """
+    DiskFaultDataLoader 现在复用 GenericLogDataLoader 的逻辑。
+    原来的实现有硬编码的文件名限制 (app.log, kernel.log, syslog.log) 和严格的日期目录结构。
+    GenericLogDataLoader 已经兼容了这种结构（自动扫描目录下的文件），且解析逻辑更强。
+    """
+    def __init__(self, dataset_path: str, default_timezone: str = "UTC"):
+        super().__init__(dataset_path, default_timezone=default_timezone)
 
 
 _LOADER_REGISTRY: Dict[str, Callable[..., BaseDataLoader]] = {}
@@ -462,3 +508,4 @@ def create_data_loader(config: Optional[Dict[str, Any]] = None) -> BaseDataLoade
 
 register_data_loader("openrca", lambda dataset_path, default_timezone="Asia/Shanghai": OpenRCADataLoader(dataset_path, default_timezone=default_timezone))
 register_data_loader("disk_fault", lambda dataset_path, default_timezone="UTC": DiskFaultDataLoader(dataset_path, default_timezone=default_timezone))
+register_data_loader("generic_log", lambda dataset_path, default_timezone="UTC": GenericLogDataLoader(dataset_path, default_timezone=default_timezone))

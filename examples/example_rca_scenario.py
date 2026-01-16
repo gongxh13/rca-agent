@@ -17,6 +17,7 @@ import os
 import sys
 from datetime import datetime
 import uuid
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,19 +37,27 @@ from src.utils.streaming_output import StreamingOutputHandler, stream_agent_exec
 def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "openrca"):
     """Initialize the RCA agent with Langfuse tracing."""
     try:
-        from langchain_deepseek import ChatDeepSeek
         from langfuse import get_client
         from langfuse.langchain import CallbackHandler
         
+        from src.config.loader import load_config
+        from src.utils.llm_factory import init_langchain_models_from_llm_config
+
         # Initialize Langfuse client
         langfuse = get_client()
         
         # Initialize Langfuse CallbackHandler for Langchain (tracing)
         langfuse_handler = CallbackHandler()
         
-        model = ChatDeepSeek(
-            model="deepseek-chat"
-        )
+        # Load config and init model
+        config_data = load_config()
+        models, default_model = init_langchain_models_from_llm_config(config_data.llm)
+        
+        if not default_model:
+            print("Error: No valid LLM model found in config")
+            return None, None
+            
+        model = default_model
         
         # Config for the agent
         # We inject domain type and dataset path
@@ -72,8 +81,7 @@ def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "open
             print("Error: langfuse not installed")
             print("Install with: pip install langfuse")
         else:
-            print("Error: langchain-deepseek not installed")
-            print("Install with: pip install langchain-deepseek")
+            print(f"Error: {e}")
         return None, None
     except Exception as e:
         print(f"Error initializing agent: {e}")

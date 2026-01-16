@@ -124,6 +124,57 @@ class DiskFaultDomainAdapter(DomainPromptAdapter):
 
 约束：本场景主要依赖日志。如果不确定，请如实说明。"""
 
+class GenericLogDomainAdapter(DomainPromptAdapter):
+    def get_prompt_hints(self) -> Dict[str, str]:
+        return {
+            "candidate_entities": "候选组件范围：基于日志目录下的所有日志文件",
+            "core_metrics": "核心指标范围：本场景主要依赖日志内容分析（错误关键字、异常模式）。",
+            "dataset_limitations": "数据集限制说明：仅包含日志数据，无指标和调用链数据。请充分利用日志中的时间戳和错误信息进行关联分析。",
+            "timezone": "UTC"
+        }
+
+    def get_orchestrator_prompt(self) -> str:
+        return """你是**根因分析协调器（RCA Orchestrator）**，负责协调通用日志场景下的故障诊断流程。
+
+你的职责是协调领域专家完成诊断任务。你需要根据任务进展，自主决定调用哪个专家。
+
+# 诊断任务目标
+
+本场景为**通用日志分析模式**，主要依赖扫描和分析文件夹下的所有日志文件，请按以下流程推进：
+
+1.  **日志异常分析**：调用根因定位专家（Root Cause Localizer），扫描所有可用的日志文件，识别错误模式、异常组件、故障发生时间，并直接推断根本原因。
+2.  **评估与决策**：调用评估专家审查分析结果。
+
+# 迭代优化
+
+如果评估专家反馈分析结果未通过：
+*   根据建议重新调用根因定位专家。
+*   再次提交评估，直到结果被接受。
+
+# 关键注意事项
+
+*   **自主决策**：请优先使用日志相关的专家工具。
+*   **灵活性**：日志文件名和内容格式可能多样，请根据实际读取到的内容进行分析。
+*   **时区**：用户输入时间和日志时间默认为 **UTC**。
+"""
+
+    def get_root_cause_localizer_prompt_template(self) -> str:
+        return """你是根因定位器（Root Cause Localizer），负责基于通用日志数据进行故障分析和根因定位。
+
+输入：用户提供的故障描述和时间范围。
+
+任务：
+1. 扫描所有可用的日志源（Log Analysis Tool 会自动加载目录下所有日志）。
+2. 识别日志中的错误模式（Error/Exception/Fail等）、异常组件（基于文件名区分）和故障发生时间。
+3. 关联不同日志源中的异常信息，推断根本原因。
+
+输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, {timezone_info}）、logic_trace。
+
+约束：
+- 本场景主要依赖日志。
+- 不要假设特定的日志文件名或组件名，根据实际数据分析。
+- 如果不确定，请如实说明。"""
+
 _DOMAIN_ADAPTER_REGISTRY: Dict[str, Callable[[], DomainPromptAdapter]] = {}
 
 def register_domain_adapter(name: str, constructor: Callable[[], DomainPromptAdapter]) -> None:
@@ -138,3 +189,4 @@ def create_domain_adapter(config: Optional[Dict[str, Any]] = None) -> DomainProm
 
 register_domain_adapter("openrca", lambda: OpenRCADomainAdapter())
 register_domain_adapter("disk_fault", lambda: DiskFaultDomainAdapter())
+register_domain_adapter("generic_log", lambda: GenericLogDomainAdapter())

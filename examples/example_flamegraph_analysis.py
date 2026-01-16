@@ -78,19 +78,27 @@ _profiling_tool = FlamegraphProfilingTool()
 def setup_agent():
     """Initialize the flamegraph analysis agent with Langfuse tracing."""
     try:
-        from langchain_deepseek import ChatDeepSeek
         from langfuse import get_client
         from langfuse.langchain import CallbackHandler
         
+        from src.config.loader import load_config
+        from src.utils.llm_factory import init_langchain_models_from_llm_config
+
         # Initialize Langfuse client
         langfuse = get_client()
         
         # Initialize Langfuse CallbackHandler for Langchain (tracing)
         langfuse_handler = CallbackHandler()
         
-        model = ChatDeepSeek(
-            model="deepseek-chat"
-        )
+        # Load config and init model
+        config_data = load_config()
+        models, default_model = init_langchain_models_from_llm_config(config_data.llm)
+        
+        if not default_model:
+            print("Error: No valid LLM model found in config")
+            return None, None
+            
+        model = default_model
         
         # Default: analysis-only agent. Some modes will create auto-profiling agent dynamically.
         flamegraph_agent = create_flamegraph_analysis_agent(model=model, config={})
