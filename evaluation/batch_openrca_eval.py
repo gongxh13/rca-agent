@@ -1198,11 +1198,15 @@ def _update_readme(metrics: Dict[str, Any], mode: str, changes: str = "-"):
     if baselines:
         base_acc_full = baselines[-1]['acc_full']
         base_acc_cr = baselines[-1]['acc_cr']
+        base_acc_comp = baselines[-1]['acc_c']
+        base_acc_reason = baselines[-1]['acc_r']
         base_acc_time = baselines[-1]['acc_t']
         base_lat = baselines[-1]['avg_lat']
     else:
         base_acc_full = 0
         base_acc_cr = 0
+        base_acc_comp = 0
+        base_acc_reason = 0
         base_acc_time = 0
         base_lat = 0
     
@@ -1241,6 +1245,8 @@ def _update_readme(metrics: Dict[str, Any], mode: str, changes: str = "-"):
     # Helper to generate Baseline Bar Data
     base_full_data = [base_acc_full] * len(x_labels)
     base_cr_data = [base_acc_cr] * len(x_labels)
+    base_comp_data = [base_acc_comp] * len(x_labels)
+    base_reason_data = [base_acc_reason] * len(x_labels)
     base_time_data = [base_acc_time] * len(x_labels)
     base_lat_data = [base_lat] * len(x_labels)
 
@@ -1266,13 +1272,23 @@ xychart-beta
     line [{", ".join(f"{v:.2f}" for v in y_acc_cr)}]
 ```"""
 
-    # Chart 3: Component vs Reason (Internal Comparison)
-    chart3_code = f"""```mermaid
+    # Chart 3.1: Component Accuracy
+    chart3_1_code = f"""```mermaid
 xychart-beta
-    title "诊断细分: 仅组件 vs 仅原因"
+    title "仅组件准确率 (Baseline: {base_acc_comp:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in y_acc_comp)}]
+    bar [{", ".join(f"{v:.2f}" for v in base_comp_data)}]
+    line [{", ".join(f"{v:.2f}" for v in y_acc_comp)}]
+```"""
+
+    # Chart 3.2: Reason Accuracy
+    chart3_2_code = f"""```mermaid
+xychart-beta
+    title "仅原因准确率 (Baseline: {base_acc_reason:.2f}%)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "准确率 (%)" 0 --> 100
+    bar [{", ".join(f"{v:.2f}" for v in base_reason_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_reason)}]
 ```"""
 
@@ -1332,9 +1348,13 @@ xychart-beta
 
 {chart2_code}
 
-### 诊断细分 (仅组件 vs 仅原因)
+### 诊断细分: 仅组件准确率 (RCA vs Baseline)
 
-{chart3_code}
+{chart3_1_code}
+
+### 诊断细分: 仅原因准确率 (RCA vs Baseline)
+
+{chart3_2_code}
 
 ### 时间定位准确率 (RCA vs Baseline)
 
