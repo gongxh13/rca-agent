@@ -1258,7 +1258,7 @@ xychart-beta
     title "准确率趋势 (Baseline: {base_acc_full:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in base_full_data)}]
+    line [{", ".join(f"{v:.2f}" for v in base_full_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_full)}]
 ```"""
 
@@ -1268,7 +1268,7 @@ xychart-beta
     title "组件+原因 准确率 (Baseline: {base_acc_cr:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in base_cr_data)}]
+    line [{", ".join(f"{v:.2f}" for v in base_cr_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_cr)}]
 ```"""
 
@@ -1278,7 +1278,7 @@ xychart-beta
     title "仅组件准确率 (Baseline: {base_acc_comp:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in base_comp_data)}]
+    line [{", ".join(f"{v:.2f}" for v in base_comp_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_comp)}]
 ```"""
 
@@ -1288,7 +1288,7 @@ xychart-beta
     title "仅原因准确率 (Baseline: {base_acc_reason:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in base_reason_data)}]
+    line [{", ".join(f"{v:.2f}" for v in base_reason_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_reason)}]
 ```"""
 
@@ -1298,7 +1298,7 @@ xychart-beta
     title "时间定位准确率 (Baseline: {base_acc_time:.2f}%)"
     x-axis [{", ".join(x_labels)}]
     y-axis "准确率 (%)" 0 --> 100
-    bar [{", ".join(f"{v:.2f}" for v in base_time_data)}]
+    line [{", ".join(f"{v:.2f}" for v in base_time_data)}]
     line [{", ".join(f"{v:.2f}" for v in y_acc_time)}]
 ```"""
 
@@ -1311,7 +1311,7 @@ xychart-beta
     title "平均耗时 (Baseline: {base_lat:.0f}s)"
     x-axis [{", ".join(x_labels)}]
     y-axis "耗时 (s)" 0 --> {max_lat_axis}
-    bar [{", ".join(f"{v:.0f}" for v in base_lat_data)}]
+    line [{", ".join(f"{v:.0f}" for v in base_lat_data)}]
     line [{", ".join(f"{v:.0f}" for v in y_lat)}]
 ```"""
 
@@ -1323,7 +1323,7 @@ xychart-beta
     title "平均 Token 消耗 (千)"
     x-axis [{", ".join(x_labels)}]
     y-axis "Tokens (k)" 0 --> {max_tok_axis}
-    bar [{", ".join(f"{v:.0f}" for v in y_tokens)}]
+    line [{", ".join(f"{v:.0f}" for v in y_tokens)}]
 ```"""
 
     # Apply updates
@@ -1337,7 +1337,7 @@ xychart-beta
         new_section = f"""{trend_header}
 
 > **说明**: 
-> *   `baseline`: 性能通常保持稳定（图中柱状背景/水平线）。
+> *   `baseline`: 性能通常保持稳定（水平线）。
 > *   `rca`: 随着Agent的迭代优化，性能曲线应呈现波动上升趋势。
 
 ### 核心准确率趋势 (RCA vs Baseline)
