@@ -4,6 +4,7 @@ import os
 import datetime
 import sys
 import logging
+import signal
 from common import MOUNT_POINT
 
 # Setup logging to output to both console and file
@@ -25,6 +26,9 @@ logger.addHandler(console_handler)
 
 FILE_PATH = os.path.join(MOUNT_POINT, "orders.dat")
 
+def timeout_handler(signum, frame):
+    raise TimeoutError("Disk write timed out after 30 seconds")
+
 def main():
     logger.info(f"Starting Order Service Simulation...")
     logger.info(f"Target file: {FILE_PATH}")
@@ -33,6 +37,9 @@ def main():
     if not os.path.exists(MOUNT_POINT):
         logger.info(f"Error: Mount point {MOUNT_POINT} does not exist. Did you run setup_disk.py?")
         sys.exit(1)
+
+    # Register signal handler for timeout
+    signal.signal(signal.SIGALRM, timeout_handler)
 
     counter = 0
     while True:
@@ -45,18 +52,28 @@ def main():
             # Simulate a critical business transaction (Write + Fsync)
             content = f"order_id={counter} timestamp={timestamp} item_id=ITEM-{counter%100} quantity=1 status=PLACED\n"
             
+            # Set timeout for 30 seconds
+            signal.alarm(30)
+            
             with open(FILE_PATH, "a") as f:
                 f.write(content)
                 f.flush()
                 os.fsync(f.fileno()) # Critical: force sync to hit the disk immediately
             
+            # Disable alarm if successful
+            signal.alarm(0)
+            
             # Format: TIMESTAMP INFO message
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} processed successfully.")
             
+        except TimeoutError as e:
+            logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} FAILED! Timeout: {e}")
         except OSError as e:
+            signal.alarm(0) # Ensure alarm is disabled
             # This is what we expect to see during fault injection
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} FAILED! Disk Error: {e}")
         except Exception as e:
+            signal.alarm(0) # Ensure alarm is disabled
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Unexpected error: {e}")
         
         counter += 1

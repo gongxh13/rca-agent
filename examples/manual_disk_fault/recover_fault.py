@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 from common import run_cmd, find_scsi_debug_device, get_device_sectors, DM_DEV_NAME, DM_DEV_PATH
+from pathlib import Path
 
 def recover():
     print(f"Recovering {DM_DEV_NAME} to normal state...")
@@ -9,9 +10,21 @@ def recover():
     try:
         device = find_scsi_debug_device()
         print(f"Found backing device: {device}")
+        device_name = Path(device).name
     except RuntimeError as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+    # Reset scsi_debug parameters (in case slow_disk was active)
+    print("Resetting scsi_debug parameters...")
+    try:
+        run_cmd(["sudo", "sh", "-c", "echo 0 > /sys/bus/pseudo/drivers/scsi_debug/every_nth"], check=False)
+        run_cmd(["sudo", "sh", "-c", "echo 0 > /sys/bus/pseudo/drivers/scsi_debug/delay"], check=False)
+        # Reset timeout to default (e.g., 30 or 60, usually 30 is fine, or just leave it)
+        # disk_fault_injector sets it to 30. Defaults vary.
+        # run_cmd(["sudo", "sh", "-c", f"echo 30 > /sys/block/{device_name}/device/timeout"], check=False)
+    except Exception as e:
+        print(f"Warning: Failed to reset scsi_debug params: {e}")
 
     # 2. Get size
     try:

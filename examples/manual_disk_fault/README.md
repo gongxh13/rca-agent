@@ -91,11 +91,22 @@ Jan 23 10:00:01 host order_service: Order 2 processed successfully.
 
 保持业务应用运行，在另一个终端窗口中运行故障注入脚本：
 
+**注入坏盘故障（默认）**：
 ```bash
 python examples/manual_disk_fault/inject_fault.py
+# 或者
+python examples/manual_disk_fault/inject_fault.py bad
 ```
 
-脚本执行完毕后，回到业务应用的终端，你会立即看到报错信息：
+**注入慢盘故障**：
+```bash
+python examples/manual_disk_fault/inject_fault.py slow
+```
+
+脚本执行完毕后，回到业务应用的终端，你会看到：
+*   **坏盘场景**: 立即看到 `Input/output error` 报错。
+*   **慢盘场景**: 业务处理变慢（例如每隔 5 秒才处理一个订单），可能会有超时警告。
+
 ```
 Jan 23 10:05:00 host order_service: Order 15 FAILED! Disk Error: [Errno 5] Input/output error
 ```

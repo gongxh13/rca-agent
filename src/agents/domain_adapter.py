@@ -136,7 +136,7 @@ class DiskFaultDomainAdapter(DomainPromptAdapter):
 任务：
 1. 扫描关键日志文件（如 syslog, kernel, app logs）。
 2. 识别错误模式、异常组件和故障发生时间。
-3. 推断根本原因。
+3. 推断根本原因。如果在某个窗口检查到多个故障，以最近的一次为主。
 
 输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, {timezone_info}）、logic_trace。
 
