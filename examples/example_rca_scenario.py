@@ -32,6 +32,86 @@ from rich.rule import Rule
 from rich.prompt import Prompt, IntPrompt
 from src.agents.rca_agents import create_rca_deep_agent
 from src.utils.streaming_output import StreamingOutputHandler, stream_agent_execution
+from src.tools.data_loader import create_data_loader
+from scripts.fetch_logs import run_fetch_logs, DEFAULT_FILE_MAPPING
+import pytz
+
+async def fetch_logs_interactive(console: Console):
+    """
+    交互式拉取日志
+    """
+    console.print()
+    console.print(Rule("[bold yellow]日志拉取配置 / Log Fetching[/bold yellow]", style="yellow"))
+    
+    # Check config
+    from src.config.loader import load_config
+    try:
+        cfg = load_config()
+        log_cfg = cfg.log_fetch
+    except Exception:
+        log_cfg = None
+
+    # Default parameters
+    mode = "local"
+    local_dir = "."
+    host = None
+    port = 22
+    user = None
+    password = None
+    remote_dir = "/tmp/fault_logs"
+    files_map = DEFAULT_FILE_MAPPING
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    if log_cfg:
+        console.print(f"[dim]Using configuration from config.yaml (mode={log_cfg.mode})...[/dim]")
+        mode = log_cfg.mode
+        local_dir = log_cfg.local_source_dir
+        host = log_cfg.remote_ip
+        port = log_cfg.remote_port
+        user = log_cfg.remote_username
+        password = log_cfg.remote_password
+        remote_dir = log_cfg.remote_log_dir
+        if log_cfg.files:
+            files_map = log_cfg.files
+    else:
+        # If no config, fallback to interactive selection
+        mode = await inquirer.select(
+            message="选择拉取模式 / Select Mode:",
+            choices=[
+                Choice(value="local", name="Local (Current Directory)"),
+                Choice(value="remote", name="Remote (SSH)")
+            ],
+            default="local"
+        ).execute_async()
+        
+        if mode == "local":
+            local_dir = Prompt.ask("请输入本地日志目录 / Local Log Dir", default=".")
+        else:
+            host = Prompt.ask("Host IP")
+            user = Prompt.ask("Username")
+            password = Prompt.ask("Password", password=True)
+            remote_dir = Prompt.ask("Remote Log Dir", default="/tmp/fault_logs")
+    
+    # Execute fetch function directly
+    console.print("[dim]Executing fetch script directly...[/dim]")
+    try:
+        success = run_fetch_logs(
+            mode=mode,
+            local_dir=local_dir,
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            remote_dir=remote_dir,
+            date_str=date_str,
+            files_map=files_map
+        )
+        if success:
+            console.print("[bold green]✓ 日志拉取完成 / Logs fetched successfully[/bold green]")
+        else:
+            console.print("[bold red]日志拉取失败 / Fetch failed[/bold red]")
+    except Exception as e:
+        console.print(f"[bold red]日志拉取错误 / Fetch error:[/bold red]\n{e}")
 
 
 def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "openrca"):
@@ -69,12 +149,15 @@ def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "open
             "trace_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
         }
         
+        # Create a dataloader instance to get configuration (like timezone)
+        dataloader = create_data_loader({"dataloader": domain, "dataset_path": dataset_path})
+        
         rca_agent = create_rca_deep_agent(
             model=model,
             config=config
         )
         
-        return rca_agent, langfuse_handler
+        return rca_agent, langfuse_handler, dataloader
         
     except ImportError as e:
         if "langfuse" in str(e):
@@ -82,12 +165,12 @@ def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "open
             print("Install with: pip install langfuse")
         else:
             print(f"Error: {e}")
-        return None, None
+        return None, None, None
     except Exception as e:
         print(f"Error initializing agent: {e}")
         import traceback
         traceback.print_exc()
-        return None, None
+        return None, None, None
 
 
 def generate_question(start_time: str, end_time: str, num_faults: int) -> str:
@@ -168,9 +251,8 @@ async def run_analysis(
     agent,
     langfuse_handler,
     console: Console,
-    start_time: str,
-    end_time: str,
-    num_faults: int
+    question: str,
+    dataloader=None
 ):
     """
     执行根因分析
@@ -179,21 +261,29 @@ async def run_analysis(
         agent: RCA agent 实例
         langfuse_handler: Langfuse callback handler
         console: Rich Console 实例
-        start_time: 开始时间
-        end_time: 结束时间
-        num_faults: 故障数量
+        question: 用户输入的分析问题
+        dataloader: 数据加载器实例 (用于获取时区配置)
     """
-    # 生成问题
-    question = generate_question(start_time, end_time, num_faults)
-    
     # 显示问题
     console.print()
-    console.print(Rule("[bold cyan]生成的分析问题[/bold cyan]", style="cyan"))
+    console.print(Rule("[bold cyan]分析问题[/bold cyan]", style="cyan"))
     console.print()
     console.print(Panel(question, title="[bold yellow]问题[/bold yellow]", border_style="yellow"))
     console.print()
     
     try:
+        # 获取当前时间
+        current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if dataloader:
+            try:
+                tz_name = dataloader.get_timezone()
+                if tz_name:
+                    tz = pytz.timezone(tz_name)
+                    # Get current time in that timezone
+                    current_time_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception as e:
+                console.print(f"[dim yellow]Warning: Failed to get timezone from dataloader: {e}[/dim yellow]")
+
         # 创建流式输出处理器
         handler = StreamingOutputHandler(console=console)
         
@@ -202,6 +292,7 @@ async def run_analysis(
             agent=agent,
             input=dict(
                 messages=[
+                    HumanMessage(content=f"Current system time: {current_time_str}"),
                     HumanMessage(content=question)
                 ]
             ),
@@ -268,7 +359,7 @@ async def main():
     console.print(f"Dataset: {dataset_path}")
     console.print()
     
-    agent, langfuse_handler = setup_agent(dataset_path=dataset_path, domain=domain)
+    agent, langfuse_handler, dataloader = setup_agent(dataset_path=dataset_path, domain=domain)
     if agent is None or langfuse_handler is None:
         console.print("[bold red]初始化失败，退出。[/bold red]")
         return
@@ -281,38 +372,46 @@ async def main():
     while True:
         try:
             # 获取用户输入
-            start_time, end_time, num_faults = get_user_input(console)
-            
-            # 执行分析
-            await run_analysis(agent, langfuse_handler, console, start_time, end_time, num_faults)
-            
-            # 询问是否继续
-            console.print()
+            if domain == "disk_fault":
+                # 磁盘故障模式：直接输入问题
+                console.print()
+                console.print(Rule("[bold cyan]请输入分析问题[/bold cyan]", style="cyan"))
+                console.print()
+                console.print("[dim]例如：请分析2026-01-23 10:00到10:30期间app应用无法使用[/dim]")
+                
+                question = Prompt.ask(
+                    "[bold yellow]请输入您的问题[/bold yellow]",
+                )
+                
+                if not question.strip():
+                    console.print("[bold red]问题不能为空，请重新输入[/bold red]")
+                    continue
+                await fetch_logs_interactive(console)
+                await run_analysis(agent, langfuse_handler, console, question, dataloader=dataloader)
+            else:
+                # OpenRCA 模式：保持原有的时间段输入
+                start_time, end_time, num_faults = get_user_input(console)
+                question = generate_question(start_time, end_time, num_faults)
+                await run_analysis(agent, langfuse_handler, console, question, dataloader=dataloader)
+                
+            # 是否继续
             continue_analysis = await inquirer.confirm(
-                message="是否继续分析其他故障？/ Continue with another fault?",
+                message="是否继续分析其他故障？/ Continue analysis?",
                 default=False
             ).execute_async()
             
             if not continue_analysis:
+                console.print("[bold green]分析结束，再见！[/bold green]")
                 break
-            
+                
         except KeyboardInterrupt:
-            console.print()
-            console.print("[bold yellow]用户中断，退出程序。[/bold yellow]")
+            console.print("\n[bold yellow]用户取消操作[/bold yellow]")
             break
         except Exception as e:
             console.print(f"[bold red]发生错误: {e}[/bold red]")
             import traceback
             console.print(traceback.format_exc())
-            
-            # 询问是否继续
-            continue_analysis = await inquirer.confirm(
-                message="是否继续？/ Continue?",
-                default=False
-            ).execute_async()
-            
-            if not continue_analysis:
-                break
+            break
     
     console.print()
     console.print(Rule("[bold green]分析完成[/bold green]", style="green"))

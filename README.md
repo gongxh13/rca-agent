@@ -126,6 +126,14 @@ poetry run python examples/example_rca_scenario.py
     - `syslog.log`：mount/umount/mkfs 失败、服务层报错、系统告警
     - `app.log`：业务侧延迟/失败（脚本可生成噪声与压力写入日志，便于验证定位链路）
 
+## 手动磁盘故障实时模拟 (Manual Real-time Disk Fault Simulation)
+
+除了上述自动化的数据集生成脚本外，本项目还提供了一套交互式的演示脚本，允许用户在 Linux 环境下手动控制磁盘故障的注入与恢复过程，实时观察业务应用的反应。
+
+*   **适用场景**: 教学演示、实时行为观察、验证故障恢复机制。
+*   **特点**: 将环境搭建、业务模拟、故障注入、恢复清理拆分为独立的步骤，便于逐步执行和分析。
+*   **文档**: 请参阅 [examples/manual_disk_fault/README.md](examples/manual_disk_fault/README.md) 获取详细的环境要求与使用步骤。
+
 ## 非交互脚本
 - 因果管线（推荐用于离线训练 + 推断）：
   - 预处理数据

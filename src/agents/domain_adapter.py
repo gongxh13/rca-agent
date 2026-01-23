@@ -83,7 +83,7 @@ class DiskFaultDomainAdapter(DomainPromptAdapter):
             "candidate_entities": "候选组件范围：主要关注 kernel, syslog, app 三个日志源，以及可能的磁盘设备（如 scsi_debug, sda, vda 等）。",
             "core_metrics": "核心指标范围：本场景主要依赖日志分析",
             "dataset_limitations": "数据集限制说明：目前仅包含 app/kernel/syslog 日志，无详细指标数据。需通过日志模式匹配",
-            "timezone": "UTC"
+            "timezone": "Asia/Shanghai"
         }
 
     def get_orchestrator_prompt(self) -> str:
@@ -91,11 +91,28 @@ class DiskFaultDomainAdapter(DomainPromptAdapter):
 
 你的职责是协调领域专家完成诊断任务。你需要根据任务进展，自主决定调用哪个专家。
 
+# 核心职责：时间窗口确定
+
+在调用专家工具前，你必须明确故障分析的时间窗口。请根据用户输入和上下文中的当前系统时间（Current system time）进行判断：
+
+1.  **显式时间窗口**：
+    *   若用户提供了具体时间范围（如“10:00到10:30”），直接使用该范围。
+    *   请结合日期信息，确保生成完整的时间戳。
+
+2.  **隐式/模糊时间窗口**：
+    *   若用户仅提到“刚刚”、“最近”或未提及时间，需根据当前时间自动推断。
+    *   **策略**：默认截取过去 **30分钟** 的窗口（也可根据语境选择10分钟或1小时）。
+    *   例如：当前时间为 2026-01-23 10:00:00，用户说“刚刚”，则窗口定为 09:30:00 至 10:00:00。
+
 # 诊断任务目标
 
 本场景主要依赖日志分析，请按以下流程推进：
 
-1.  **日志异常分析**：调用根因定位专家（Root Cause Localizer），扫描日志文件，识别错误模式、异常组件、故障发生时间，并直接推断根本原因。
+1.  **日志异常分析**：
+    *   调用根因定位专家（Root Cause Localizer）。
+    *   **必须在任务描述中包含明确的时间窗口**（Start Time, End Time）。
+    *   任务示例：“分析 2026-01-23 09:30:00 到 10:00:00 期间的日志，识别异常...”。
+
 2.  **评估与决策**：调用评估专家审查分析结果。
 
 # 迭代优化
@@ -107,7 +124,8 @@ class DiskFaultDomainAdapter(DomainPromptAdapter):
 # 关键注意事项
 
 *   **自主决策**：请优先使用日志相关的专家工具。
-*   **时区**：本场景下，用户输入时间和日志时间均为 **UTC**。
+*   **时区**：本场景默认为 **Asia/Shanghai (UTC+8)**，请确保时间处理一致。
+*   **明确指令**：子Agent（根因定位器）需要精确的时间范围来过滤日志，不要下发模糊的时间指令。
 """
 
     def get_root_cause_localizer_prompt_template(self) -> str:

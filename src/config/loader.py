@@ -1,12 +1,29 @@
 import yaml
 import os
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
 from .llm_config import LLMConfig
 
+class LogFetchConfig(BaseModel):
+    mode: str = "local"  # local or remote
+    
+    # Remote settings
+    remote_ip: Optional[str] = None
+    remote_port: int = 22
+    remote_username: Optional[str] = None
+    remote_password: Optional[str] = None
+    remote_log_dir: Optional[str] = None
+    
+    # Local settings
+    local_source_dir: Optional[str] = None
+    
+    # File mapping: destination_filename -> source_path (absolute or relative)
+    files: Optional[Dict[str, str]] = None
+
 class Config(BaseModel):
     llm: List[LLMConfig]
+    log_fetch: Optional[LogFetchConfig] = None
 
 def _expand_env(obj: Any) -> Any:
     if isinstance(obj, str):

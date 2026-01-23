@@ -439,9 +439,34 @@ class GenericLogDataLoader(BaseDataLoader):
                                         msg_val = parts1[1]
                                     except:
                                         pass
+                            
+                            # 策略 3: Syslog 格式 (Month Day Time, e.g., Jan 23 09:42:01)
+                            # 需要注入年份
+                            if ts_val is None:
+                                parts3 = line.split(" ", 3)
+                                if len(parts3) >= 4:
+                                    try:
+                                        # 尝试确定年份
+                                        year_str = str(pd.Timestamp.now().year)
+                                        # 如果父目录看起来像日期 (YYYY-MM-DD)，使用它
+                                        parent_name = file_path.parent.name
+                                        if len(parent_name) >= 4 and parent_name[:4].isdigit():
+                                            year_str = parent_name[:4]
+                                        
+                                        # 构造带年份的时间字符串: "YYYY Month Day Time"
+                                        potential_ts = f"{year_str} {parts3[0]} {parts3[1]} {parts3[2]}"
+                                        ts = pd.to_datetime(potential_ts)
+                                        ts_val = ts
+                                        msg_val = parts3[3]
+                                    except:
+                                        pass
 
                             if ts_val is not None:
                                 try:
+                                    # 如果解析出的时间没有时区信息，假设它属于当前配置的时区
+                                    if ts_val.tzinfo is None:
+                                        ts_val = ts_val.tz_localize(self._tz)
+                                        
                                     ts_ms = int(ts_val.timestamp() * 1000)
                                     data.append({
                                         COL_TIMESTAMP: ts_ms,
@@ -486,7 +511,7 @@ class DiskFaultDataLoader(GenericLogDataLoader):
     原来的实现有硬编码的文件名限制 (app.log, kernel.log, syslog.log) 和严格的日期目录结构。
     GenericLogDataLoader 已经兼容了这种结构（自动扫描目录下的文件），且解析逻辑更强。
     """
-    def __init__(self, dataset_path: str, default_timezone: str = "UTC"):
+    def __init__(self, dataset_path: str, default_timezone: str = "Asia/Shanghai"):
         super().__init__(dataset_path, default_timezone=default_timezone)
 
 
@@ -507,5 +532,5 @@ def create_data_loader(config: Optional[Dict[str, Any]] = None) -> BaseDataLoade
     return constructor(dataset_path)
 
 register_data_loader("openrca", lambda dataset_path, default_timezone="Asia/Shanghai": OpenRCADataLoader(dataset_path, default_timezone=default_timezone))
-register_data_loader("disk_fault", lambda dataset_path, default_timezone="UTC": DiskFaultDataLoader(dataset_path, default_timezone=default_timezone))
+register_data_loader("disk_fault", lambda dataset_path, default_timezone="Asia/Shanghai": DiskFaultDataLoader(dataset_path, default_timezone=default_timezone))
 register_data_loader("generic_log", lambda dataset_path, default_timezone="UTC": GenericLogDataLoader(dataset_path, default_timezone=default_timezone))

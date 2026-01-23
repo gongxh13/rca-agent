@@ -431,6 +431,7 @@ class StreamingOutputHandler:
         show_progress: bool = True,
         show_tokens: bool = True,
         show_custom: bool = True,
+        keep_history: Optional[bool] = None,
     ):
         """
         初始化流式输出处理器
@@ -445,6 +446,13 @@ class StreamingOutputHandler:
         self.show_progress = show_progress
         self.show_tokens = show_tokens
         self.show_custom = show_custom
+        env_keep_history = os.environ.get("RCA_STREAM_KEEP_HISTORY")
+        if keep_history is not None:
+            self.keep_history: bool = bool(keep_history)
+        elif env_keep_history is not None:
+            self.keep_history = env_keep_history.lower() in ("1", "true", "yes", "on")
+        else:
+            self.keep_history = False
         
         # 存储当前流式内容，使用消息id作为key
         self.accumulated_texts: Dict[str, str] = {}  # message_id -> content
@@ -454,6 +462,12 @@ class StreamingOutputHandler:
         
         # 用于跟踪当前正在流式输出的消息id
         self.current_streaming_msg_id: Optional[str] = None
+        
+        # 记录已完成的消息id（已打印到静态区域）
+        self.finalized_msg_ids: set = set()
+        
+        # 记录已结束流式传输的消息id（可能还在排队等待打印）
+        self.completed_streaming_msg_ids: set = set()
         
         # 使用 Live 组件来管理实时更新（全局单一实例）
         self.live: Optional[Live] = None
@@ -527,12 +541,43 @@ class StreamingOutputHandler:
         else:
             return node_name
     
-    def _get_display_panel_for_message(self, msg_id: str) -> Panel:
+    def _get_display_group(self) -> Group:
+        """
+        获取包含当前活跃消息的显示组
+        
+        注意：在并行模式下，我们只显示最先到达的那个活跃消息（排队机制）
+        
+        Returns:
+            Group 对象
+        """
+        panels = []
+        # 按插入顺序遍历，只显示第一个未完成（未打印）的消息
+        for msg_id in self.accumulated_texts:
+            # 跳过已打印的消息
+            if msg_id in self.finalized_msg_ids:
+                continue
+            
+            # 找到第一个未打印的消息，显示它
+            content = self.accumulated_texts[msg_id]
+            # 如果内容为空，也显示（显示Loading状态），或者跳过
+            # if not content or not content.strip():
+            #    continue
+                
+            # 在 Live 模式下，限制显示行数
+            panels.append(self._get_display_panel_for_message(msg_id, max_lines=15))
+            
+            # 只显示这一个，实现序列化显示
+            break
+            
+        return Group(*panels)
+
+    def _get_display_panel_for_message(self, msg_id: str, max_lines: Optional[int] = None) -> Panel:
         """
         为指定消息id构建显示Panel
         
         Args:
             msg_id: 消息id
+            max_lines: 最大显示行数，如果超过则截断并显示最后 N 行。None 表示不限制。
             
         Returns:
             Panel 对象
@@ -548,10 +593,24 @@ class StreamingOutputHandler:
         # 获取已执行时间
         elapsed_time = self._get_elapsed_time_str()
         
-        # 只显示消息内容，不显示时间戳和节点名称
-        display_text = Text(content, style="")
+        # 处理内容截断
+        display_content = content
+        if max_lines is not None and content:
+            lines = content.splitlines(keepends=True)
+            if len(lines) > max_lines:
+                # 只显示最后 max_lines 行
+                display_content = "".join(lines[-max_lines:])
+                # 添加提示信息（可选）
+                # display_content = f"... (previous lines hidden)\n{display_content}"
         
-        return Panel(display_text, title=f"Message ({node_name}) | 已执行: {elapsed_time}", border_style="blue", expand=True)
+        # 只显示消息内容，不显示时间戳和节点名称
+        display_text = Text(display_content, style="")
+        
+        title = f"Message ({node_name}) | 已执行: {elapsed_time}"
+        if max_lines is not None and content and len(content.splitlines()) > max_lines:
+             title += f" | (Displaying last {max_lines} lines)"
+        
+        return Panel(display_text, title=title, border_style="blue", expand=True)
     
     def handle_messages_stream(
         self,
@@ -579,11 +638,11 @@ class StreamingOutputHandler:
                 "node_name": node_name,
                 "run_id": metadata.get("run_id", "") if metadata else "",
             }
-            # 如果是新消息且当前有正在流式输出的消息，直接切换到新消息（通过刷新覆盖）
-            # 不打印旧消息，让它被新消息覆盖
-            if self.current_streaming_msg_id is not None and self.current_streaming_msg_id != msg_id:
-                # 旧消息会被新消息覆盖，不需要特殊处理
-                pass
+            # 注意：在并行流式输出时，不要因为切换了 msg_id 就 finalize 前一个消息
+            # 否则会导致交替输出时频繁打印和清空内容
+            # if self.current_streaming_msg_id is not None and self.current_streaming_msg_id != msg_id:
+            #     if self.keep_history:
+            #         self.finalize_message_stream(self.current_streaming_msg_id)
         
         # 提取消息内容
         content = ""
@@ -649,6 +708,12 @@ class StreamingOutputHandler:
                     if hasattr(self.live, '_thread') and self.live._thread is None:
                         live_needs_restart = True
             
+            # 获取要显示的内容（单个 Panel 或 Group）
+            if self.keep_history:
+                renderable = self._get_display_group()
+            else:
+                renderable = self._get_display_panel_for_message(msg_id)
+
             if self.live is None or live_needs_restart:
                 # 如果 Live 实例已停止，先清理
                 if self.live is not None:
@@ -658,22 +723,20 @@ class StreamingOutputHandler:
                         pass
                     self.live = None
                 
-                panel = self._get_display_panel_for_message(msg_id)
                 # 在 WSL 环境中，需要更高的刷新频率和强制刷新
                 # 使用较大的 refresh_per_second 值以确保实时更新
                 self.live = Live(
-                    panel, 
+                    renderable, 
                     console=self.console, 
                     refresh_per_second=50,  # 提高刷新频率到 50Hz，确保实时性
-                    transient=False,
+                    transient=True,
                     auto_refresh=True,  # 启用自动刷新
                 )
                 self.live.start()
             
             # 更新 Live 显示内容（刷新当前消息）
-            panel = self._get_display_panel_for_message(msg_id)
             try:
-                self.live.update(panel)
+                self.live.update(renderable)
             except (RuntimeError, AttributeError) as e:
                 # 如果更新失败，重新创建 Live 实例
                 if self.live is not None:
@@ -684,10 +747,10 @@ class StreamingOutputHandler:
                 self.live = None
                 # 重新创建并启动
                 self.live = Live(
-                    panel, 
+                    renderable, 
                     console=self.console, 
                     refresh_per_second=50,
-                    transient=False,
+                    transient=True,
                     auto_refresh=True,
                 )
                 self.live.start()
@@ -738,13 +801,34 @@ class StreamingOutputHandler:
     
     def handle_updates_stream(self, chunk: Dict[str, Any]) -> None:
         """
-        处理 updates 流式输出（当前不处理）
+        处理 updates 流式输出
         
         Args:
             chunk: 更新块，包含节点名称和状态信息或中断信息
         """
-        # 暂时不处理 updates 类型的消息
-        return
+        # 如果 keep_history 为 False，不进行自动 finalize
+        if not self.keep_history:
+            return
+
+        # chunk 通常是 {node_name: output}
+        # 我们可以检查这些 node_name 是否对应当前活跃的 msg_id
+        # 如果是，说明该 Node 的执行可能已完成，可以 finalize 对应的消息
+        
+        # 收集需要 finalize 的 msg_id
+        msg_ids_to_finalize = []
+        
+        for node_name in chunk.keys():
+            if node_name == "__interrupt__":
+                continue
+                
+            # 查找匹配的 msg_id
+            for msg_id, metadata in self.message_metadata.items():
+                if metadata.get("node_name") == node_name:
+                    msg_ids_to_finalize.append(msg_id)
+        
+        # 执行 finalize
+        for msg_id in msg_ids_to_finalize:
+            self.finalize_message_stream(msg_id)
     
     def finalize_message_stream(self, msg_id: str) -> None:
         """
@@ -753,20 +837,105 @@ class StreamingOutputHandler:
         Args:
             msg_id: 消息id
         """
-        # 如果这是当前正在流式输出的消息，停止 Live 并打印最终结果
-        if self.current_streaming_msg_id == msg_id and self.live is not None:
-            self.live.stop()
-            self.live = None
-            self.current_streaming_msg_id = None
+        # 1. 检查是否需要操作
+        if msg_id not in self.accumulated_texts:
+             return
+        if msg_id in self.finalized_msg_ids:
+             return
         
-        # 如果有内容，打印最终结果（正常换行，不会被覆盖）
-        if msg_id in self.accumulated_texts and self.accumulated_texts[msg_id]:
-            final_panel = self._get_display_panel_for_message(msg_id)
+        # 标记为流式传输结束
+        self.completed_streaming_msg_ids.add(msg_id)
+
+        # 2. 检查是否是当前活跃消息（第一个未打印的消息）
+        # 如果不是，说明是后台并行消息完成了，只标记 completed，不打印，等待轮到它
+        first_active_msg_id = None
+        for mid in self.accumulated_texts:
+            if mid not in self.finalized_msg_ids:
+                first_active_msg_id = mid
+                break
+        
+        if msg_id != first_active_msg_id:
+            return
+
+        # 3. 如果是当前活跃消息，开始循环处理（Flush Queue）
+        # 这一步是为了把当前消息以及紧随其后的已完成消息一次性打印出来
+        
+        # 循环检查队列，只要遇到已完成流式传输的消息，就打印
+        # 直到遇到一个还在流式传输的消息，或者队列结束
+        
+        # 注意：要在循环中动态获取 next active，因为 finalized_msg_ids 会变化
+        while True:
+            # 获取当前队首（未打印的）
+            current_head_msg_id = None
+            for mid in self.accumulated_texts:
+                if mid not in self.finalized_msg_ids:
+                    current_head_msg_id = mid
+                    break
+            
+            # 如果没有待处理消息，退出
+            if current_head_msg_id is None:
+                break
+                
+            # 如果当前队首消息还没有结束流式传输，退出循环，让它继续在 Live 中显示
+            if current_head_msg_id not in self.completed_streaming_msg_ids:
+                # 确保 Live 是开启的并显示它
+                if self.live is None:
+                    renderable = self._get_display_group()
+                    self.live = Live(
+                        renderable, 
+                        console=self.console, 
+                        refresh_per_second=50,
+                        transient=True,
+                        auto_refresh=True,
+                    )
+                    self.live.start()
+                else:
+                    # 更新显示
+                    renderable = self._get_display_group()
+                    self.live.update(renderable)
+                break
+            
+            # 如果当前队首消息已经结束流式传输，打印它
+            
+            # 获取最终 Panel
+            final_panel = self._get_display_panel_for_message(current_head_msg_id)
+            
+            # 标记为已打印
+            self.finalized_msg_ids.add(current_head_msg_id)
+            
+            # 更新 Live（移除当前消息，显示下一个）
+            if self.live is not None:
+                renderable = self._get_display_group()
+                self.live.update(renderable)
+                try:
+                    self.live.refresh()
+                except Exception:
+                    pass
+            
+            # 打印静态内容
             self.console.print(final_panel)
-            # 清空该消息的内容
-            del self.accumulated_texts[msg_id]
-            if msg_id in self.message_metadata:
-                del self.message_metadata[msg_id]
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            
+            # 继续循环，检查下一个消息
+        
+        # 循环结束后，检查是否所有消息都处理完了
+        has_remaining = False
+        for mid in self.accumulated_texts:
+            if mid not in self.finalized_msg_ids:
+                has_remaining = True
+                break
+        
+        if not has_remaining:
+            if self.live is not None:
+                try:
+                    self.live.stop()
+                except Exception:
+                    pass
+                self.live = None
+                self.current_streaming_msg_id = None
     
     def get_last_message_content(self) -> Optional[str]:
         """
@@ -792,18 +961,30 @@ class StreamingOutputHandler:
         return None
     
     def finalize_all(self) -> None:
-        """完成所有流式输出，只显示最后一条消息的最终结果"""
+        """完成所有流式输出"""
         # 停止 Live 实例
         if self.live is not None:
             self.live.stop()
             self.live = None
         
-        # 只打印最后一条消息（当前正在流式输出的消息）
-        if self.current_streaming_msg_id:
-            if self.current_streaming_msg_id in self.accumulated_texts and self.accumulated_texts[self.current_streaming_msg_id]:
-                final_panel = self._get_display_panel_for_message(self.current_streaming_msg_id)
-                self.console.print(final_panel)
-                # 不清空，保留内容以便后续获取（在 cleanup 中清理）
+        # 如果 keep_history 为 True，打印所有累积的消息
+        if self.keep_history:
+            for msg_id in self.accumulated_texts:
+                # 跳过已完成的消息
+                if msg_id in self.finalized_msg_ids:
+                    continue
+                    
+                if self.accumulated_texts[msg_id]:
+                    final_panel = self._get_display_panel_for_message(msg_id)
+                    self.console.print(final_panel)
+                    self.finalized_msg_ids.add(msg_id)
+        else:
+            # 否则只打印最后一条消息（当前正在流式输出的消息）
+            if self.current_streaming_msg_id:
+                if self.current_streaming_msg_id in self.accumulated_texts and self.accumulated_texts[self.current_streaming_msg_id]:
+                    final_panel = self._get_display_panel_for_message(self.current_streaming_msg_id)
+                    self.console.print(final_panel)
+                    # 不清空，保留内容以便后续获取（在 cleanup 中清理）
         
         # 打印分隔线
         self.console.print()
@@ -815,6 +996,8 @@ class StreamingOutputHandler:
         # 清空所有累积的消息
         self.accumulated_texts.clear()
         self.message_metadata.clear()
+        self.finalized_msg_ids.clear()
+        self.completed_streaming_msg_ids.clear()
         self.current_custom.clear()
         self.current_updates.clear()
         self.current_streaming_msg_id = None
@@ -904,6 +1087,10 @@ async def stream_agent_execution(
                 elif mode == "updates":
                     # updates 模式：检查是否有中断
                     # 根据用户提供的代码片段，__interrupt__ 可能在 chunk_data 中
+                    if isinstance(chunk_data, dict):
+                         # 首先尝试处理更新（自动 finalize 已完成的节点）
+                         handler.handle_updates_stream(chunk_data)
+
                     if isinstance(chunk_data, dict) and "__interrupt__" in chunk_data:
                         interrupt_data = chunk_data["__interrupt__"]
                         # 处理中断，获取用户决策或输入
@@ -991,6 +1178,9 @@ async def stream_agent_execution(
                     handler.handle_custom_stream(chunk)
                 elif "updates" in stream_modes and isinstance(chunk, dict):
                     # updates 模式：检查是否有中断
+                    # 尝试处理更新（自动 finalize 已完成的节点）
+                    handler.handle_updates_stream(chunk)
+
                     if "__interrupt__" in chunk:
                         interrupt_data = chunk["__interrupt__"]
                         # 处理中断，获取用户决策或输入

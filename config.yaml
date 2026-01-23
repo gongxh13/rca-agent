@@ -3,3 +3,25 @@ llm:
     model: deepseek-chat
     # api_key: "your-api-key" # Optional if set in env vars
     # base_url: "https://api.deepseek.com" # Optional
+
+log_fetch:
+  mode: local # local or remote
+  # Local settings
+  # Base directory for relative paths in 'files' (e.g., where app.log is located)
+  local_source_dir: "." 
+  
+  # Remote settings
+  remote_ip: "127.0.0.1"
+  remote_port: 22
+  remote_username: "root"
+  remote_password: "password"
+  # Base directory for relative paths in 'files' (e.g., /opt/my_app/logs)
+  remote_log_dir: "/tmp/logs"
+  
+  # File mapping (Optional)
+  # Maps target filename (in dataset) to source path (on machine).
+  # Source path can be absolute (e.g., "/var/log/kern.log") or relative to source_dir.
+  files:
+    app.log: "app.log"
+    kernel.log: "kernel.log" # Or /var/log/messages
+    syslog.log: "/var/log/messages"   # Or /var/log/messages
