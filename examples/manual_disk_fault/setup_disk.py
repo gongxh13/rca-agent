@@ -47,7 +47,7 @@ def setup():
     print("\nSUCCESS: Disk setup complete.")
     print(f"Device: {DM_DEV_PATH}")
     print(f"Mounted at: {MOUNT_POINT}")
-    print("You can now run 'python3 business_app.py'")
+    print("You can now run 'python3 order_service.py'")
 
 if __name__ == "__main__":
     setup()

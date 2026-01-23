@@ -7,7 +7,7 @@ import logging
 from common import MOUNT_POINT
 
 # Setup logging to output to both console and file
-logger = logging.getLogger("business_app")
+logger = logging.getLogger("order_service")
 logger.setLevel(logging.INFO)
 
 # Formatter to just pass through the message (since we manually format timestamp)
@@ -23,10 +23,10 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-FILE_PATH = os.path.join(MOUNT_POINT, "business_data.dat")
+FILE_PATH = os.path.join(MOUNT_POINT, "orders.dat")
 
 def main():
-    logger.info(f"Starting Business App Simulation...")
+    logger.info(f"Starting Order Service Simulation...")
     logger.info(f"Target file: {FILE_PATH}")
     logger.info("Press Ctrl+C to stop.")
 
@@ -43,7 +43,7 @@ def main():
         
         try:
             # Simulate a critical business transaction (Write + Fsync)
-            content = f"transaction_id={counter} timestamp={timestamp} payload={'x'*100}\n"
+            content = f"order_id={counter} timestamp={timestamp} item_id=ITEM-{counter%100} quantity=1 status=PLACED\n"
             
             with open(FILE_PATH, "a") as f:
                 f.write(content)
@@ -51,13 +51,13 @@ def main():
                 os.fsync(f.fileno()) # Critical: force sync to hit the disk immediately
             
             # Format: TIMESTAMP INFO message
-            logger.info(f"{timestamp} {os.uname().nodename} business_app: Transaction {counter} committed successfully.")
+            logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} processed successfully.")
             
         except OSError as e:
             # This is what we expect to see during fault injection
-            logger.info(f"{timestamp} {os.uname().nodename} business_app: Transaction {counter} FAILED! Disk Error: {e}")
+            logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} FAILED! Disk Error: {e}")
         except Exception as e:
-            logger.info(f"{timestamp} {os.uname().nodename} business_app: Unexpected error: {e}")
+            logger.info(f"{timestamp} {os.uname().nodename} order_service: Unexpected error: {e}")
         
         counter += 1
         time.sleep(1.0)
@@ -66,4 +66,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        logger.info("\nBusiness App stopped.")
+        logger.info("\nOrder Service stopped.")

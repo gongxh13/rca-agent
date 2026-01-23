@@ -49,7 +49,7 @@ modprobe --version
 
 *   `common.py`: 公共辅助函数。
 *   `setup_disk.py`: 准备虚拟磁盘环境（创建设备、格式化、挂载）。
-*   `business_app.py`: 模拟业务应用，持续对磁盘进行读写操作。
+*   `order_service.py`: 模拟业务应用（订单服务），持续对磁盘进行读写操作。
 *   `inject_fault.py`: 注入坏盘故障（将磁盘切换为错误状态）。
 *   `recover_fault.py`: 恢复磁盘（将磁盘切换回正常状态）。
 *   `teardown.py`: 清理环境（卸载磁盘、移除设备）。
@@ -77,13 +77,13 @@ Mounted at: /mnt/demo_disk
 在一个单独的终端窗口中，运行业务应用。它会持续写入和读取数据。
 
 ```bash
-python examples/manual_disk_fault/business_app.py
+python examples/manual_disk_fault/order_service.py
 ```
 
 你会看到正常的日志输出：
 ```
-[INFO] Transaction 1 committed successfully.
-[INFO] Transaction 2 committed successfully.
+Jan 23 10:00:00 host order_service: Order 1 processed successfully.
+Jan 23 10:00:01 host order_service: Order 2 processed successfully.
 ...
 ```
 
@@ -97,7 +97,7 @@ python examples/manual_disk_fault/inject_fault.py
 
 脚本执行完毕后，回到业务应用的终端，你会立即看到报错信息：
 ```
-[ERROR] Transaction 15 FAILED! Disk Error: [Errno 5] Input/output error
+Jan 23 10:05:00 host order_service: Order 15 FAILED! Disk Error: [Errno 5] Input/output error
 ```
 
 同时，当前目录下会生成 `kernel.log` 文件，记录了内核层面的错误日志。
