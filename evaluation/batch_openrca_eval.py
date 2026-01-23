@@ -16,6 +16,7 @@ import concurrent.futures
 from langfuse import get_client
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn
+from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -60,20 +61,6 @@ def _build_question(start_time: str, end_time: str, num_faults: int = 1) -> str:
         "你的任务是确定故障的根本原因组件、根本原因发生的具体时间以及根本原因。"
     )
 
-
-def _quantize_half_hour_window(center: datetime) -> Tuple[str, str]:
-    # Align start to whole hour or half hour, then end = start + 30 minutes
-    minute = center.minute
-    if minute < 30:
-        start_dt = center.replace(minute=0, second=0, microsecond=0)
-    else:
-        start_dt = center.replace(minute=30, second=0, microsecond=0)
-    end_dt = start_dt + timedelta(minutes=30)
-    return start_dt.strftime("%Y-%m-%d %H:%M:%S"), end_dt.strftime("%Y-%m-%d %H:%M:%S")
-
-
-from collections import defaultdict
-import statistics
 
 def _quantize_half_hour_window(dt: datetime) -> Tuple[str, str]:
     """
@@ -560,6 +547,12 @@ def main():
         default=None,
         help="Path to dataset root or evaluation-record.csv"
     )
+    parser.add_argument(
+        "--changes",
+        type=str,
+        default="-",
+        help="Description of changes for this run (e.g. 'Optimized prompt')"
+    )
     args = parser.parse_args()
 
     # Special handling for 'eval' mode
@@ -592,7 +585,7 @@ def main():
 
         console.print("[bold cyan]Running Evaluation Metrics...[/bold cyan]")
         try:
-            _run_evaluation_metrics(csv_path, args.dataset_path, logger)
+            _run_evaluation_metrics(csv_path, args.dataset_path, logger, changes=args.changes)
         except Exception as e:
             logger.error(f"Failed to run evaluation metrics: {e}")
             console.print(f"[red]Failed to run evaluation metrics: {e}[/red]")
@@ -767,7 +760,7 @@ def main():
     
     with progress:
         task_id = progress.add_task("Processing", total=total_tasks)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             for task_idx, run, instruction in tasks_to_run:
                 futures.append(executor.submit(_run_task, task_idx, run, instruction, args.mode))
                      
@@ -803,7 +796,7 @@ def main():
 
         console.print("[bold cyan]Running Evaluation Metrics...[/bold cyan]")
         try:
-            _run_evaluation_metrics(target_csv, args.dataset_path, logger)
+            _run_evaluation_metrics(target_csv, args.dataset_path, logger, changes=args.changes)
         except Exception as e:
             logger.error(f"Failed to run evaluation metrics: {e}")
             console.print(f"[red]Failed to run evaluation metrics: {e}[/red]")
@@ -890,7 +883,7 @@ def _refresh_langfuse_data(csv_path: Path, logger=None):
         if logger:
             logger.info(f"Refreshed {changes_count} rows with Langfuse data.")
 
-def _run_evaluation_metrics(results_csv_path: Path, dataset_path: Optional[str] = None, logger=None):
+def _run_evaluation_metrics(results_csv_path: Path, dataset_path: Optional[str] = None, logger=None, changes: str = "-"):
     # 1. Load Ground Truth Mapping
     all_records, window_to_records = _load_all_records_grouped(dataset_path)
     
@@ -1098,11 +1091,11 @@ def _run_evaluation_metrics(results_csv_path: Path, dataset_path: Optional[str] 
 
     # Update README
     try:
-        _update_readme(metrics, "baseline" if "baseline" in str(results_csv_path) else "rca")
+        _update_readme(metrics, "baseline" if "baseline" in str(results_csv_path) else "rca", changes)
     except Exception as e:
         print(f"Failed to update README: {e}")
 
-def _update_readme(metrics: Dict[str, Any], mode: str):
+def _update_readme(metrics: Dict[str, Any], mode: str, changes: str = "-"):
     readme_path = Path(__file__).parent / "README.md"
     if not readme_path.exists():
         return
@@ -1114,76 +1107,254 @@ def _update_readme(metrics: Dict[str, Any], mode: str):
     acc_full = metrics['all_correct']/total * 100
     acc_cr = metrics['comp_reason_correct']/total * 100
     acc_c = metrics['comp_correct']/total * 100
+    acc_r = metrics['reason_correct']/total * 100
+    acc_t = metrics['time_correct']/total * 100
     avg_lat = (metrics['latency_sum']/metrics['count_valid_latency'] / 1000) if metrics['count_valid_latency'] else 0
     avg_tok = metrics['tokens_sum']/total / 1000 # in k
-
-    # We need to parse existing tables and charts to append new data
-    content = readme_path.read_text(encoding="utf-8")
-    
-    # 1. Update Table
-    # Find the table | Date | ...
-    # We will just insert a new line after the separator line | :--- | ...
-    
-    # 10 columns: Date, Mode, Latency, Total Tok, Input Tok, Input Cache Tok, Output Tok, Acc Full, Acc CR, Acc C
-    table_header_sig = "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
-    
     avg_input_k = metrics['input_tokens_sum']/total/1000
     avg_cache_k = metrics['input_cache_tokens_sum']/total/1000
     avg_output_k = metrics['output_tokens_sum']/total/1000
+
+    # Read content
+    content = readme_path.read_text(encoding="utf-8")
     
-    new_row = f"| **{today}** | {mode} | {avg_lat:.0f}s | {avg_tok:.0f}k | {avg_input_k:.0f}k | {avg_cache_k:.0f}k | {avg_output_k:.0f}k | {acc_full:.2f}% | {acc_cr:.2f}% | {acc_c:.2f}% |"
+    # --- 1. Append New Row to Table ---
+    # Header signature to locate the table
+    table_header_sig = "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
+    
+    new_row = f"| **{today}** | {mode} | {changes} | {avg_lat:.0f}s | {avg_tok:.0f}k | {avg_input_k:.0f}k | {avg_cache_k:.0f}k | {avg_output_k:.0f}k | {acc_full:.2f}% | {acc_cr:.2f}% | {acc_c:.2f}% | {acc_r:.2f}% | {acc_t:.2f}% |"
     
     if table_header_sig in content:
         parts = content.split(table_header_sig)
-        # Check if this exact row already exists to avoid duplicates?
-        # A simple heuristic: if the date and mode matches in the first line of the table body
-        # For now, let's just prepend to the top of the table (after header)
+        # Append new row immediately after header separator
         content = parts[0] + table_header_sig + "\n" + new_row + parts[1]
     
-    # 2. Update Charts
-    # We look for `xychart-beta` blocks and parse x-axis and data
-    # This is a bit complex with regex, let's try a simpler append approach if strict parsing fails
-    # But since we control the format, we can try to find the lines.
+    # --- 2. Parse All Data for Charts ---
+    # We need to re-read the table from 'content' (which now includes the new row)
+    # to generate the full history for charts.
     
     import re
     
-    # Update Accuracy Chart
-    # Pattern: x-axis ["A", "B"] ... line [10, 20]
-    # We want to add today to x-axis and acc_full to line
+    # Regex to find the table rows
+    # Look for lines starting with | and containing the date pattern or just non-header lines
+    # Skip the header lines
     
-    def update_chart(chart_title_keyword, new_x, new_y, content_str):
-        # Find the block
-        # Adjusted regex for Chinese titles and looser matching
-        pattern = re.compile(r'(xychart-beta\s+title "[^"]*' + re.escape(chart_title_keyword) + r'[^"]*"\s+x-axis \[)(.*?)(\]\s+y-axis ".*?" \d+ --> \d+\s+(?:line|bar) \[)(.*?)(\])', re.DOTALL)
-        match = pattern.search(content_str)
-        if match:
-            x_content = match.group(2)
-            y_content = match.group(4)
+    lines = content.splitlines()
+    data_rows = []
+    
+    in_table = False
+    header_found = False
+    
+    for line in lines:
+        if "| 日期 | Agent模式 |" in line:
+            in_table = True
+            continue
+        if ":---" in line and in_table:
+            header_found = True
+            continue
+        
+        if in_table and header_found:
+            if not line.strip().startswith("|"):
+                in_table = False # End of table
+                continue
             
-            # Helper to split and clean
-            xs = [x.strip().strip('"') for x in x_content.split(',')]
-            ys = [y.strip() for y in y_content.split(',')]
-            
-            # Append new data
-            # To avoid clutter, maybe limit to last 10 points?
-            xs.append(new_x)
-            ys.append(f"{new_y:.2f}")
-            
-            new_x_str = '"' + '", "'.join(xs) + '"'
-            new_y_str = ', '.join(ys)
-            
-            # Reconstruct
-            start = match.start()
-            end = match.end()
-            new_block = f"{match.group(1)}{new_x_str}{match.group(3)}{new_y_str}{match.group(5)}"
-            return content_str[:start] + new_block + content_str[end:]
-        return content_str
+            # Parse row
+            # | **2026-01-23** | baseline | ...
+            cols = [c.strip() for c in line.strip().split('|') if c.strip()]
+            if len(cols) >= 13: # Ensure we have enough columns
+                # Columns:
+                # 0: Date, 1: Mode, 2: Changes, 3: Latency, 4: TotalTok, 
+                # 5: InTok, 6: CacheTok, 7: OutTok, 
+                # 8: Full%, 9: CR%, 10: Comp%, 11: Reason%, 12: Time%
+                
+                try:
+                    row_data = {
+                        "date": cols[0].replace("**", ""),
+                        "mode": cols[1],
+                        "changes": cols[2],
+                        "acc_full": float(cols[8].strip('%')),
+                        "acc_cr": float(cols[9].strip('%')),
+                        "acc_c": float(cols[10].strip('%')),
+                        "acc_r": float(cols[11].strip('%')),
+                        "acc_t": float(cols[12].strip('%')),
+                        "tokens": float(cols[4].strip('k')),
+                        "avg_lat": float(cols[3].strip('s'))
+                    }
+                    data_rows.append(row_data)
+                except ValueError:
+                    continue # Skip malformed rows
+    
+    # Sort data by date (Oldest to Newest)
+    # The table usually has newest on top (if we prepend). 
+    # Let's assume we want chronological order for charts.
+    # Our 'new_row' logic prepends, so the list 'data_rows' (read from top to bottom) is Newest -> Oldest.
+    # We need to reverse it.
+    data_rows.reverse()
+    
+    # Filter Data
+    baselines = [r for r in data_rows if r['mode'] == 'baseline']
+    
+    # Determine Baseline Constants
+    if baselines:
+        base_acc_full = baselines[-1]['acc_full']
+        base_acc_cr = baselines[-1]['acc_cr']
+        base_acc_time = baselines[-1]['acc_t']
+        base_lat = baselines[-1]['avg_lat']
+    else:
+        base_acc_full = 0
+        base_acc_cr = 0
+        base_acc_time = 0
+        base_lat = 0
+    
+    # Prepare Chart Data
+    x_labels = []
+    y_acc_full = []
+    y_acc_cr = []
+    y_acc_comp = []
+    y_acc_reason = []
+    y_acc_time = []
+    y_lat = []
+    y_tokens = []
+    
+    for r in data_rows:
+        label = r['date'][5:] # Remove Year "2026-" -> "01-23"
+        x_labels.append(f'"{label}"')
+        y_acc_full.append(r['acc_full'])
+        y_acc_cr.append(r['acc_cr'])
+        y_acc_comp.append(r['acc_c'])
+        y_acc_reason.append(r['acc_r'])
+        y_acc_time.append(r['acc_t'])
+        y_lat.append(r['avg_lat'])
+        y_tokens.append(r['tokens'])
 
-    content = update_chart("准确率趋势", today, acc_full, content)
-    content = update_chart("平均 Token", today, avg_tok, content)
+    if not x_labels:
+        # If no data yet
+        x_labels = ["Pending"]
+        y_acc_full = [0]
+        y_acc_cr = [0]
+        y_acc_comp = [0]
+        y_acc_reason = [0]
+        y_acc_time = [0]
+        y_lat = [0]
+        y_tokens = [0]
 
+    # Helper to generate Baseline Bar Data
+    base_full_data = [base_acc_full] * len(x_labels)
+    base_cr_data = [base_acc_cr] * len(x_labels)
+    base_time_data = [base_acc_time] * len(x_labels)
+    base_lat_data = [base_lat] * len(x_labels)
+
+    # --- 3. Regenerate Chart Sections ---
+    
+    # Chart 1: Full Accuracy
+    chart1_code = f"""```mermaid
+xychart-beta
+    title "准确率趋势 (Baseline: {base_acc_full:.2f}%)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "准确率 (%)" 0 --> 100
+    bar [{", ".join(f"{v:.2f}" for v in base_full_data)}]
+    line [{", ".join(f"{v:.2f}" for v in y_acc_full)}]
+```"""
+
+    # Chart 2: Component + Reason Accuracy
+    chart2_code = f"""```mermaid
+xychart-beta
+    title "组件+原因 准确率 (Baseline: {base_acc_cr:.2f}%)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "准确率 (%)" 0 --> 100
+    bar [{", ".join(f"{v:.2f}" for v in base_cr_data)}]
+    line [{", ".join(f"{v:.2f}" for v in y_acc_cr)}]
+```"""
+
+    # Chart 3: Component vs Reason (Internal Comparison)
+    chart3_code = f"""```mermaid
+xychart-beta
+    title "诊断细分: 仅组件 vs 仅原因"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "准确率 (%)" 0 --> 100
+    bar [{", ".join(f"{v:.2f}" for v in y_acc_comp)}]
+    line [{", ".join(f"{v:.2f}" for v in y_acc_reason)}]
+```"""
+
+    # Chart 4: Time Correctness
+    chart4_code = f"""```mermaid
+xychart-beta
+    title "时间定位准确率 (Baseline: {base_acc_time:.2f}%)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "准确率 (%)" 0 --> 100
+    bar [{", ".join(f"{v:.2f}" for v in base_time_data)}]
+    line [{", ".join(f"{v:.2f}" for v in y_acc_time)}]
+```"""
+
+    # Chart 5: Latency
+    # Adjust Y-axis max dynamically? 
+    max_lat = max(y_lat + [base_lat]) if y_lat else 100
+    max_lat_axis = int(max_lat * 1.2)
+    chart5_code = f"""```mermaid
+xychart-beta
+    title "平均耗时 (Baseline: {base_lat:.0f}s)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "耗时 (s)" 0 --> {max_lat_axis}
+    bar [{", ".join(f"{v:.0f}" for v in base_lat_data)}]
+    line [{", ".join(f"{v:.0f}" for v in y_lat)}]
+```"""
+
+    # Chart 6: Token Usage
+    max_tok = max(y_tokens) if y_tokens else 100
+    max_tok_axis = int(max_tok * 1.2)
+    chart6_code = f"""```mermaid
+xychart-beta
+    title "平均 Token 消耗 (千)"
+    x-axis [{", ".join(x_labels)}]
+    y-axis "Tokens (k)" 0 --> {max_tok_axis}
+    bar [{", ".join(f"{v:.0f}" for v in y_tokens)}]
+```"""
+
+    # Apply updates
+    trend_header = "## 📈 趋势分析"
+    next_header = "## 🤖 模型与配置"
+    
+    if trend_header in content and next_header in content:
+        start_idx = content.find(trend_header)
+        end_idx = content.find(next_header)
+        
+        new_section = f"""{trend_header}
+
+> **说明**: 
+> *   `baseline`: 性能通常保持稳定（图中柱状背景/水平线）。
+> *   `rca`: 随着Agent的迭代优化，性能曲线应呈现波动上升趋势。
+
+### 核心准确率趋势 (RCA vs Baseline)
+
+{chart1_code}
+
+### 组件+原因 准确率 (RCA vs Baseline)
+
+{chart2_code}
+
+### 诊断细分 (仅组件 vs 仅原因)
+
+{chart3_code}
+
+### 时间定位准确率 (RCA vs Baseline)
+
+{chart4_code}
+
+### 平均耗时 (RCA vs Baseline)
+
+{chart5_code}
+
+### 资源消耗 (Resource Usage)
+
+{chart6_code}
+
+---
+
+"""
+        content = content[:start_idx] + new_section + content[end_idx:]
+    
     readme_path.write_text(content, encoding="utf-8")
-    print(f"Updated README.md with new results.")
+    print(f"Updated README.md with new results and charts.")
 
 if __name__ == "__main__":
     main()
