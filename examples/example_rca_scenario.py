@@ -135,7 +135,7 @@ def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "open
         
         if not default_model:
             print("Error: No valid LLM model found in config")
-            return None, None
+            return None, None, None
             
         model = default_model
         
