@@ -9,6 +9,11 @@ RCA Agent 是一个面向分布式系统的自动化根因分析系统，结合�
 - 交互式流式分析：命令行交互、实时输出、可选接入 Langfuse 追踪
 - CPU 火焰图：可选采集与分析，辅助定位性能瓶颈
 
+## 评估与基准 (Evaluation)
+本项目维护了一个自动化的评估仪表盘，用于追踪 Agent 在标准数据集（如 OpenRCA Bank）上的性能表现。
+- **评估仪表盘**: [evaluation/README.md](evaluation/README.md)
+- **核心指标**: 根因定位准确率（组件/原因/时间）、Token 消耗、端到端延迟。
+
 ## 数据集准备
 - 默认使用 OpenRCA Bank 场景数据，路径为 datasets/OpenRCA/Bank
 - 将数据集放到上述路径即可，无需额外代码配置
