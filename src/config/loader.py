@@ -21,9 +21,13 @@ class LogFetchConfig(BaseModel):
     # File mapping: destination_filename -> source_path (absolute or relative)
     files: Optional[Dict[str, str]] = None
 
+class EvaluationConfig(BaseModel):
+    enable: bool = True
+
 class Config(BaseModel):
     llm: List[LLMConfig]
     log_fetch: Optional[LogFetchConfig] = None
+    evaluation: Optional[EvaluationConfig] = None
 
 def _expand_env(obj: Any) -> Any:
     if isinstance(obj, str):

@@ -21,7 +21,10 @@ TOOL_CONFIGS = {
     }
 }
 
-FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION = """
+def get_final_rca_report_template(config: Optional[Dict[str, Any]] = None) -> str:
+    enable_evaluation = (config or {}).get("evaluation", {}).get("enable", True)
+    
+    template = """
 # 最终输出格式要求（务必严格遵守）
 
 在完成所有分析与评估决策后，你需要向用户输出一份面向业务方的最终诊断报告，使用 Markdown 格式。
@@ -51,9 +54,13 @@ FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION = """
    - <概述关键指标的异常模式、主要/次要异常组件，以及故障时间窗口。>
 2. **根因定位与验证**：
    - <说明如何利用调用链、日志、trace 或其他证据逐步收敛到最终根因，包括故障传播路径。>
-3. **评估与验证**：
+"""
+    if enable_evaluation:
+        template += """3. **评估与验证**：
    - <总结评估代理对本次分析的评价，以及给出的置信度或结论（如“通过/未通过/需要更多分析”）。>
+"""
 
+    template += """
 ### **关键证据**
 
 1. <证据 1：例如时间点匹配、某组件在故障窗口内出现显著异常。>
@@ -66,16 +73,22 @@ FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION = """
 1. <立即行动建议：例如需要立刻排查或修复的配置、代码或资源问题。>
 2. <监控与告警优化建议：例如新增或收紧哪些监控指标与告警阈值。>
 3. <系统韧性或架构层面的改进建议：例如引入熔断、限流、降级、冗余等机制。>
+"""
 
+    if enable_evaluation:
+        template += """
 ### **评估说明**
 
 <用一小段话总结评估代理的整体结论，以及与数据集限制相关的说明（例如：缺少某类日志或指标，但不影响当前根因判断；或者由于数据缺失导致结论存在不确定性）。>
+"""
 
+    template += """
 **诊断状态**：<用简洁标记当前诊断状态，例如：“✅ 完成并接受”、“⚠️ 分析有待补充但给出最佳猜测”、“❌ 未能确认根因，仅给出可能方向”等。>
 ```
 
 无论是 OpenRCA、磁盘故障等任何场景，你在最终生成对用户可见的结果时，都必须按照上述 Markdown 结构组织内容，并结合具体场景填充或精简列表项，但整体章节结构必须保持一致。
 """
+    return template
 
 METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT = """
 你是指标故障分析师（Metric Fault Analyst），负责异常检测与故障定界。
@@ -90,14 +103,26 @@ METRIC_FAULT_ANALYST_AGENT_SYSTEM_PROMPT = """
 """
 
 def get_deep_agent_prompt(config: Optional[Dict[str, Any]] = None) -> str:
-    adapter = create_domain_adapter((config or {}).get("metric_analyzer") or {})
+    cfg = config or {}
+    metric_cfg = cfg.get("metric_analyzer") or {}
+    
+    # Merge metric config with root config to ensure 'evaluation' setting is available
+    # Priority: root config > metric config (but root usually doesn't have domain_adapter)
+    # We start with metric_cfg (containing domain_adapter) and update with cfg (containing evaluation)
+    # We must ensure we don't overwrite domain_adapter with None if it's missing in cfg
+    adapter_config = metric_cfg.copy()
+    adapter_config.update({k: v for k, v in cfg.items() if k != "metric_analyzer"})
+    
+    adapter = create_domain_adapter(adapter_config)
     base_prompt = adapter.get_orchestrator_prompt()
+    report_template = get_final_rca_report_template(cfg)
+    
     if not base_prompt:
-        return FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION.strip()
+        return report_template.strip()
     return (
         base_prompt.strip()
         + "\n\n"
-        + FINAL_RCA_REPORT_TEMPLATE_INSTRUCTION.strip()
+        + report_template.strip()
     )
 
 def get_metric_fault_analyst_prompt(config: Optional[Dict[str, Any]] = None) -> str:
@@ -148,9 +173,13 @@ def get_root_cause_localizer_prompt(config: Optional[Dict[str, Any]] = None) -> 
 
 输入：指标故障分析师输出的已确认故障组件列表和用户原始描述。
 
-根因数量：根据用户描述决定是单根因还是多根因。单根因时选择最可能的唯一组件；多根因时分别输出各自组件与时间。
+根因数量确定（极重要）：
+1. 仔细分析用户原始描述中提到的故障场景数量。
+2. 如果用户只描述了一个故障（例如：“服务响应变慢”），你必须只输出一个最可能的根因。
+3. 如果用户明确描述了多个故障（例如：“上午10点报错一次，下午3点又报错一次”），你必须分别为每一次故障定位根因，并输出对应数量的结果。
+4. 根因数量应与用户描述的故障发生次数或独立故障场景完全匹配。
 
-输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, {timezone_info}）、logic_trace。时间取自异常列表的最早故障开始时间或日志/调用链证据的对应时间点。
+输出：JSON对象，root_causes数组包含 component、reason、fault_start_time（ISO, {timezone_info}）、logic_trace。
 
 约束：不编造，当日志/调用链无证据时如实说明未知；仅使用已提供工具完成分析。
 """

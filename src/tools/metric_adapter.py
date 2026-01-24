@@ -104,14 +104,24 @@ class OpenRCAMetricAdapter(MetricSemanticAdapter):
     def classify_metric(self, metric_name: str) -> Optional[Dict[str, Any]]:
         name = str(metric_name)
         lower = name.lower()
+        
+        # CPU
         if name == 'OSLinux-CPU_CPU_CPUCpuUtil':
             return {"kind": "cpu.util", "unit": "percent"}
+            
+        # Memory
         if name == 'OSLinux-OSLinux_MEMORY_MEMORY_MEMUsedMemPerc':
             return {"kind": "mem.util", "unit": "percent"}
+            
+        # Disk I/O
         if re.match(r'.*DSKRead$', name) or re.match(r'.*DSKWrite$', name) or re.match(r'.*DSKReadWrite$', name):
             return {"kind": "disk.io", "unit": "rate"}
+            
+        # Disk Space
         if 'disk' in lower and ('space' in lower or 'usage' in lower):
             return {"kind": "disk.space", "unit": "percent"}
+            
+        # Network
         if 'NETBandwidthUtil' in name:
             return {"kind": "net.util", "unit": "percent"}
         if re.match(r'.*NETInErr.*$', name) or re.match(r'.*NETOutErr.*$', name):
@@ -120,12 +130,38 @@ class OpenRCAMetricAdapter(MetricSemanticAdapter):
             return {"kind": "net.tcp", "unit": "count"}
         if re.match(r'.*NetworkRxBytes$', name) or re.match(r'.*NetworkTxBytes$', name):
             return {"kind": "net.bytes", "unit": "bytes"}
+        if 'NETPackets' in name:
+            return {"kind": "net.packets", "unit": "count"}
+            
+        # JVM
         if 'JVM' in name and '_CPULoad' in name:
             return {"kind": "jvm.cpu.load", "unit": "ratio"}
         if 'JVM_Heap_Usage' in name:
             return {"kind": "jvm.heap.usage", "unit": "ratio"}
+        if 'ThreadCount' in name:
+            return {"kind": "jvm.thread.count", "unit": "count"}
         if 'HeapMemoryMax' in name or 'HeapMemoryUsed' in name:
-            return None
+            return None # Processed in derived metrics
+            
+        # Application (from metric_app.csv)
+        if name == 'App_mrt':
+            return {"kind": "app.mrt", "unit": "ms"}
+        if name == 'App_sr':
+            return {"kind": "app.sr", "unit": "percent"}
+        if name == 'App_cnt':
+            return {"kind": "app.count", "unit": "count"}
+        if 'ErrorCount' in name:
+            return {"kind": "app.error", "unit": "count"}
+
+        # Database (MySQL)
+        if 'Mysql' in name:
+            if 'Innodb' in name:
+                if 'Row Lock Waits' in name:
+                    return {"kind": "db.innodb.lock_wait", "unit": "count"}
+                return {"kind": "db.innodb", "unit": "count"}
+            if 'Connections' in name:
+                return {"kind": "db.connections", "unit": "count"}
+                
         return None
 
     def get_absolute_threshold(self, metric_class: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -133,31 +169,38 @@ class OpenRCAMetricAdapter(MetricSemanticAdapter):
             return None
         kind = metric_class.get("kind")
         if kind == "mem.util":
-            return 85.0
+            return 90.0
         if kind == "jvm.cpu.load":
-            return 20.0
+            return 50.0 # Increased threshold as 20% might be too sensitive
         if kind == "cpu.util":
-            return 80.0
+            return 90.0
         if kind == "jvm.heap.usage":
             return 0.9
         if kind == "net.util":
-            return 85.0
+            return 90.0
+        if kind == "app.sr":
+            return 98.0 # Success rate below 98% is concerning
+        if kind == "net.error":
+            return 0.0 # Any network error is notable
         return None
 
     def get_baseline_params(self, metric_class: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
         if not metric_class:
             return {"min_baseline_threshold": 0.1, "reference_value": 100.0}
         kind = metric_class.get("kind", "")
-        if kind == "jvm.cpu.load":
+        
+        # Ratio/Percent types (0-1 or 0-100)
+        if kind in ("jvm.cpu.load", "jvm.heap.usage"):
             return {"min_baseline_threshold": 0.1, "reference_value": 1.0}
-        if kind == "cpu.util":
-            return {"min_baseline_threshold": 10.0, "reference_value": 100.0}
-        if kind == "mem.util":
-            return {"min_baseline_threshold": 10.0, "reference_value": 100.0}
-        if kind == "jvm.heap.usage":
-            return {"min_baseline_threshold": 0.1, "reference_value": 1.0}
-        if kind in ("net.util", "disk.space"):
-            return {"min_baseline_threshold": 10.0, "reference_value": 100.0}
+        if kind in ("cpu.util", "mem.util", "net.util", "disk.space", "app.sr"):
+            return {"min_baseline_threshold": 5.0, "reference_value": 100.0}
+            
+        # Count/Latency types (Unbounded)
+        if kind in ("app.mrt", "db.innodb.lock_wait", "net.error", "app.error"):
+             # For these, we mainly look for spikes relative to history, 
+             # but a small absolute change might be noise.
+            return {"min_baseline_threshold": 1.0, "reference_value": 1000.0} # Placeholder reference
+            
         return {"min_baseline_threshold": 0.1, "reference_value": 100.0}
 
     def format_severity(self, deviation_pct: float, max_value: float) -> Optional[str]:

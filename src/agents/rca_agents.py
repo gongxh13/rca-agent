@@ -4,10 +4,12 @@ RCA Agent System
 Implementation of DeepAgent-based root cause analysis system with specialized sub-agents.
 """
 
+import os
 from typing import Optional, Dict, Any, List, Annotated
 from typing_extensions import TypedDict
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
+from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware, TodoListMiddleware, SummarizationMiddleware
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
@@ -308,8 +310,6 @@ def create_sub_agent_middleware(
             model="deepseek-chat",
             base_url="https://api.deepseek.com/",
             api_key=os.getenv("DEEPSEEK_API_KEY"),
-            http_client=sync_client,
-            http_async_client=async_client,
         )
     if not config:
         dataset_path = "datasets/OpenRCA/Bank"
@@ -326,8 +326,8 @@ def create_sub_agent_middleware(
     # 2. Root Cause Localizer
     root_cause_localizer_agent = create_root_cause_localizer_agent(sub_agent_model, config)
     
-    # 4. Evaluation Decision Agent
-    evaluation_decision_agent = create_evaluation_decision_agent(sub_agent_model, config)
+    # Check if evaluation is enabled
+    enable_evaluation = config.get("evaluation", {}).get("enable", True)
 
     # 5. Encapsulate SubAgents
     subagents = [
@@ -341,12 +341,18 @@ def create_sub_agent_middleware(
             description="Expert in Root Cause Localization. Responsible for localizing root causes using Traces and Logs based on confirmed faults.",
             runnable=root_cause_localizer_agent
         ),
-        CompiledSubAgent(
-            name="evaluation_decision_agent",
-            description="Expert in Evaluation and Decision. Responsible for evaluating analysis results from other agents and making final decisions.",
-            runnable=evaluation_decision_agent
-        ),
     ]
+    
+    if enable_evaluation:
+        # 4. Evaluation Decision Agent
+        evaluation_decision_agent = create_evaluation_decision_agent(sub_agent_model, config)
+        subagents.append(
+            CompiledSubAgent(
+                name="evaluation_decision_agent",
+                description="Expert in Evaluation and Decision. Responsible for evaluating analysis results from other agents and making final decisions.",
+                runnable=evaluation_decision_agent
+            )
+        )
 
     middleware = [
         TodoListMiddleware(),

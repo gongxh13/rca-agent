@@ -148,6 +148,10 @@ def setup_agent(dataset_path: str = "datasets/OpenRCA/Bank", domain: str = "open
             "log_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
             "trace_analyzer": {"dataset_path": dataset_path, "domain_adapter": domain, "dataloader": domain},
         }
+
+        # Merge evaluation config
+        if config_data.evaluation:
+            config["evaluation"] = config_data.evaluation.model_dump()
         
         # Create a dataloader instance to get configuration (like timezone)
         dataloader = create_data_loader({"dataloader": domain, "dataset_path": dataset_path})

@@ -179,12 +179,12 @@ def _load_all_records_grouped(dataset_path: Optional[str] = None):
 
 def _load_queries(
     dataset_path: Optional[str] = None, limit: int = 20
-) -> List[Tuple[str, str]]:
+) -> List[Tuple[str, str, int]]:
     
     all_records, window_to_records = _load_all_records_grouped(dataset_path)
 
     # Second pass: Build questions based on limit
-    rows: List[Tuple[str, str]] = []
+    rows: List[Tuple[str, str, int]] = []
     idx_counter = 0
     
     for record in all_records:
@@ -200,7 +200,7 @@ def _load_queries(
         
         question = _build_question(start, end, num_faults=count)
         idx_counter += 1
-        rows.append((str(idx_counter), question))
+        rows.append((str(idx_counter), question, count))
         
         if len(rows) >= limit:
             break
@@ -243,6 +243,11 @@ def _create_agent(dataset_path: str = "datasets/OpenRCA/Bank"):
             "dataloader": "openrca",
         },
     }
+    
+    # Merge evaluation config
+    if config_data.evaluation:
+        config["evaluation"] = config_data.evaluation.model_dump()
+        
     agent = create_rca_deep_agent(model=model, config=config)
     handler = CallbackHandler()
     return agent, handler
@@ -342,7 +347,9 @@ def _log_extraction_error(log_path: Path, error_msg: str, prompt: str, raw_respo
 
 
 def _extract_fields_llm(
-    text: str, error_log_path: Optional[Path] = None
+    text: str, 
+    error_log_path: Optional[Path] = None,
+    expected_count: int = 1
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     from langchain_deepseek import ChatDeepSeek
 
@@ -359,12 +366,24 @@ def _extract_fields_llm(
         "network latency", "network packet loss"
     ]
 
+    count_instruction = ""
+    if expected_count == 1:
+        count_instruction = "3. **数量限制**：通常只有一个根因。仅当报告明确指出存在多个独立故障（非因果关联）时，才提取多个。"
+    else:
+        count_instruction = f"3. **数量限制**：根据输入信息，系统中发生了{expected_count}次故障，因此请提取{expected_count}个根因。如果报告中确认的根因少于此数量，则提取所有确认的根因。"
+
     prompt = (
-        "请从以下文本中提取并返回JSON格式列表："
-        '[{"component":"","reason":"","time":""}, ...]。\n'
-        f"component必须是以下之一：{', '.join(valid_components)}。\n"
-        f"reason必须是以下之一：{', '.join(valid_reasons)}。\n"
-        "time使用原文中的日期时间字符串。文本如下：\n"
+        "请从以下故障诊断报告中提取**最终确认的根因**，并返回JSON格式列表："
+        '[{"component":"","reason":"","time":""}, ...]。\n\n'
+        "**提取规则**：\n"
+        "1. **仅关注根因**：只提取‘根本原因分析结果’章节中明确认定的‘故障组件’。\n"
+        "2. **排除传播链**：严禁提取‘故障传播链’中的下游受影响组件或中间节点，除非它们被明确标记为独立的根因。\n"
+        f"{count_instruction}\n"
+        "4. **字段约束**：\n"
+        f"   - component必须是以下之一：{', '.join(valid_components)}。\n"
+        f"   - reason必须是以下之一：{', '.join(valid_reasons)}。\n"
+        "   - time使用原文中的日期时间字符串。\n\n"
+        "待分析文本：\n"
         f"{text}"
     )
     try:
@@ -630,6 +649,7 @@ def main():
     
     # 1. Setup timestamped directory
     timestamp = datetime.now().strftime("%Y%m%d")
+    timestamp = f"20260125"
     eval_root = Path.cwd() / "evaluation" / "history" / timestamp
     eval_root.mkdir(parents=True, exist_ok=True)
     
@@ -682,7 +702,7 @@ def main():
 
     client = _get_langfuse_client()
 
-    def _run_task(task_idx: str, run: int, instruction: str, mode: str) -> Dict[str, Any]:
+    def _run_task(task_idx: str, run: int, instruction: str, mode: str, expected_count: int) -> Dict[str, Any]:
         from langfuse.langchain import CallbackHandler
         
         # Determine agent and handler
@@ -710,7 +730,7 @@ def main():
         with save_path.open("w", encoding="utf-8") as f:
             f.write(content)
             
-        comp, reason, t = _extract_fields_llm(content, error_log_path=extraction_errors_file)
+        comp, reason, t = _extract_fields_llm(content, error_log_path=extraction_errors_file, expected_count=expected_count)
         in_toks, in_cache_toks, out_toks, tot_toks, lf_latency = _fetch_langfuse_metrics(trace_id)
         
         return {
@@ -733,7 +753,7 @@ def main():
     tasks_to_run = []
     skipped_count = 0
     
-    for task_idx, instruction in queries:
+    for task_idx, instruction, expected_count in queries:
         completed_runs_set = completed_progress.get(task_idx, set())
         
         # We want total 1 run per task
@@ -741,7 +761,7 @@ def main():
             if run in completed_runs_set:
                 skipped_count += 1
                 continue
-            tasks_to_run.append((task_idx, run, instruction))
+            tasks_to_run.append((task_idx, run, instruction, expected_count))
 
     total_tasks = len(tasks_to_run)
     console.print(f"[dim]Total Tasks to Run[/dim]: {total_tasks} (Skipped {skipped_count} completed runs)")
@@ -761,8 +781,8 @@ def main():
     with progress:
         task_id = progress.add_task("Processing", total=total_tasks)
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            for task_idx, run, instruction in tasks_to_run:
-                futures.append(executor.submit(_run_task, task_idx, run, instruction, args.mode))
+            for task_idx, run, instruction, expected_count in tasks_to_run:
+                futures.append(executor.submit(_run_task, task_idx, run, instruction, args.mode, expected_count))
                      
             for fut in concurrent.futures.as_completed(futures):
                 try:
