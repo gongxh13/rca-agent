@@ -4,6 +4,7 @@
 
 | 日期 | Agent模式 | 变更内容 | 平均耗时 | 总 Token | 输入 Token | 输入缓存 Token | 输出 Token | 组件+原因+时间 (全对) | 组件+原因 | 仅组件 | 仅原因 | 仅时间 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **2026-01-24** | rca | 不使用评估反思能力，只使用metric/log/trace相关的工具 | 431s | 485k | 474k | 454k | 11k | 6.45% | 8.06% | 14.52% | 16.13% | 41.94% |
 | **2026-01-23** | baseline | - | 991s | 347k | 332k | 285k | 16k | 9.68% | 9.68% | 24.19% | 16.13% | 27.42% |
 
 > **注意**: 指标基于严格的“集合相等”匹配。如果一个任务有多个根因，必须全部识别正确才算成功。
@@ -59,10 +60,10 @@
 ```mermaid
 xychart-beta
     title "准确率趋势 (Baseline: 9.68%)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "准确率 (%)" 0 --> 100
-    line [9.68]
-    line [9.68]
+    line [9.68, 9.68]
+    line [9.68, 6.45]
 ```
 
 ### 组件+原因 准确率 (RCA vs Baseline)
@@ -70,10 +71,10 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "组件+原因 准确率 (Baseline: 9.68%)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "准确率 (%)" 0 --> 100
-    line [9.68]
-    line [9.68]
+    line [9.68, 9.68]
+    line [9.68, 8.06]
 ```
 
 ### 诊断细分: 仅组件准确率 (RCA vs Baseline)
@@ -81,10 +82,10 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "仅组件准确率 (Baseline: 24.19%)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "准确率 (%)" 0 --> 100
-    line [24.19]
-    line [24.19]
+    line [24.19, 24.19]
+    line [24.19, 14.52]
 ```
 
 ### 诊断细分: 仅原因准确率 (RCA vs Baseline)
@@ -92,10 +93,10 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "仅原因准确率 (Baseline: 16.13%)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "准确率 (%)" 0 --> 100
-    line [16.13]
-    line [16.13]
+    line [16.13, 16.13]
+    line [16.13, 16.13]
 ```
 
 ### 时间定位准确率 (RCA vs Baseline)
@@ -103,10 +104,10 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "时间定位准确率 (Baseline: 27.42%)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "准确率 (%)" 0 --> 100
-    line [27.42]
-    line [27.42]
+    line [27.42, 27.42]
+    line [27.42, 41.94]
 ```
 
 ### 平均耗时 (RCA vs Baseline)
@@ -114,10 +115,10 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "平均耗时 (Baseline: 991s)"
-    x-axis ["01-23"]
+    x-axis ["01-23", "01-24"]
     y-axis "耗时 (s)" 0 --> 1189
-    line [991]
-    line [991]
+    line [991, 991]
+    line [991, 431]
 ```
 
 ### 资源消耗 (Resource Usage)
@@ -125,9 +126,9 @@ xychart-beta
 ```mermaid
 xychart-beta
     title "平均 Token 消耗 (千)"
-    x-axis ["01-23"]
-    y-axis "Tokens (k)" 0 --> 416
-    line [347]
+    x-axis ["01-23", "01-24"]
+    y-axis "Tokens (k)" 0 --> 582
+    line [347, 485]
 ```
 
 ---
