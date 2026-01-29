@@ -52,8 +52,8 @@ def main():
             # Simulate a critical business transaction (Write + Fsync)
             content = f"order_id={counter} timestamp={timestamp} item_id=ITEM-{counter%100} quantity=1 status=PLACED\n"
             
-            # Set timeout for 30 seconds
-            signal.alarm(30)
+            # Set timeout for 15 seconds
+            signal.alarm(15)
             
             with open(FILE_PATH, "a") as f:
                 f.write(content)
