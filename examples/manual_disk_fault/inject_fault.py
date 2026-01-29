@@ -62,12 +62,12 @@ def inject_slow_disk(start_time):
         # if 1, then every command.
         run_cmd(["sudo", "sh", "-c", "echo 1 > /sys/bus/pseudo/drivers/scsi_debug/every_nth"], check=True)
         
-        # delay: delay in jiffies (or ms). 5000 is significant.
-        run_cmd(["sudo", "sh", "-c", "echo 5000 > /sys/bus/pseudo/drivers/scsi_debug/delay"], check=True)
+        # delay: delay in jiffies (or ms). 10000 is significant.
+        run_cmd(["sudo", "sh", "-c", "echo 10000 > /sys/bus/pseudo/drivers/scsi_debug/delay"], check=True)
         
         # timeout: set on block device side to avoid quick timeout if desired?
-        # disk_fault_injector sets it to 30.
-        run_cmd(["sudo", "sh", "-c", f"echo 30 > /sys/block/{device_name}/device/timeout"], check=True)
+        # disk_fault_injector sets it to 2.
+        run_cmd(["sudo", "sh", "-c", f"echo 2 > /sys/block/{device_name}/device/timeout"], check=True)
         
     except Exception as e:
         print(f"Error setting parameters: {e}")

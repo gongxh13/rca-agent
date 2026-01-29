@@ -390,14 +390,14 @@ def slow_disk(cfg: RunConfig, cmd_log: IO[str]) -> None:
         check=False,
     )
     run_cmd(
-        ["sudo", "sh", "-c", f"echo 30 > /sys/block/{device_name}/device/timeout"],
+        ["sudo", "sh", "-c", f"echo 2 > /sys/block/{device_name}/device/timeout"],
         dry_run=cfg.dry_run,
         stdout=cmd_log,
         stderr=cmd_log,
         check=False,
     )
     run_cmd(
-        ["sudo", "sh", "-c", "echo 5000 > /sys/bus/pseudo/drivers/scsi_debug/delay"],
+        ["sudo", "sh", "-c", "echo 10000 > /sys/bus/pseudo/drivers/scsi_debug/delay"],
         dry_run=cfg.dry_run,
         stdout=cmd_log,
         stderr=cmd_log,

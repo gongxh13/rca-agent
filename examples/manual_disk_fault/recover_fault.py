@@ -21,8 +21,7 @@ def recover():
         run_cmd(["sudo", "sh", "-c", "echo 0 > /sys/bus/pseudo/drivers/scsi_debug/every_nth"], check=False)
         run_cmd(["sudo", "sh", "-c", "echo 0 > /sys/bus/pseudo/drivers/scsi_debug/delay"], check=False)
         # Reset timeout to default (e.g., 30 or 60, usually 30 is fine, or just leave it)
-        # disk_fault_injector sets it to 30. Defaults vary.
-        # run_cmd(["sudo", "sh", "-c", f"echo 30 > /sys/block/{device_name}/device/timeout"], check=False)
+        run_cmd(["sudo", "sh", "-c", f"echo 30 > /sys/block/{device_name}/device/timeout"], check=False)
     except Exception as e:
         print(f"Warning: Failed to reset scsi_debug params: {e}")
 
