@@ -69,11 +69,18 @@ def main():
         except TimeoutError as e:
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} FAILED! Timeout: {e}")
         except OSError as e:
-            signal.alarm(0) # Ensure alarm is disabled
+            try:
+                signal.alarm(0) # Ensure alarm is disabled
+            except TimeoutError:
+                # If timeout occurs during error handling, ignore it to ensure logging proceeds
+                pass
             # This is what we expect to see during fault injection
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Order {counter} FAILED! Disk Error: {e}")
         except Exception as e:
-            signal.alarm(0) # Ensure alarm is disabled
+            try:
+                signal.alarm(0) # Ensure alarm is disabled
+            except TimeoutError:
+                pass
             logger.info(f"{timestamp} {os.uname().nodename} order_service: Unexpected error: {e}")
         
         counter += 1
